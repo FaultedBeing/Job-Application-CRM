@@ -57,3 +57,7 @@ linux/
 *.tmp
 *.temp
 .cache/
+
+# Documentation (user-specific setup guides)
+GITHUB_SETUP.md
+START_HERE.md
