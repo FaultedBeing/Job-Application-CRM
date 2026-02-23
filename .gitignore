@@ -5,9 +5,12 @@ package-lock.json
 # Build outputs
 dist/
 build/
-*.exe
 win-unpacked/
 *.asar
+
+# Exclude .exe files EXCEPT the installer in root folder
+*.exe
+!Job Application Tracker Setup *.exe
 
 # Database files (user data - don't commit)
 *.sqlite
