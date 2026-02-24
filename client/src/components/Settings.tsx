@@ -8,6 +8,7 @@ export default function Settings() {
   const [newStatus, setNewStatus] = useState('');
   const [industries, setIndustries] = useState<string[]>([]);
   const [newIndustry, setNewIndustry] = useState('');
+  const [allowPrerelease, setAllowPrerelease] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -56,6 +57,10 @@ export default function Settings() {
       } else {
         setIndustries(industryList);
       }
+      
+      // Load allow_prerelease setting
+      const allowPrereleaseStr = res.data.allow_prerelease || 'false';
+      setAllowPrerelease(allowPrereleaseStr === 'true');
     } catch (error) {
       console.error('Error loading settings:', error);
     }
@@ -66,7 +71,8 @@ export default function Settings() {
       await api.post('/settings', {
         username,
         statuses: statuses.join(','),
-        industries: industries.join('|')
+        industries: industries.join('|'),
+        allow_prerelease: allowPrerelease ? 'true' : 'false'
       });
       alert('Settings saved!');
     } catch (error) {
@@ -320,6 +326,30 @@ export default function Settings() {
             <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>No categories yet. Add some industry categories to get started.</p>
           )}
         </div>
+      </section>
+
+      {/* Auto-Update Settings */}
+      <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>Auto-Update Settings</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', color: '#e5e7eb' }}>
+            <input
+              type="checkbox"
+              checked={allowPrerelease}
+              onChange={(e) => setAllowPrerelease(e.target.checked)}
+              style={{
+                width: '20px',
+                height: '20px',
+                cursor: 'pointer',
+                accentColor: '#fbbf24'
+              }}
+            />
+            <span>Include pre-releases when checking for updates</span>
+          </label>
+        </div>
+        <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginTop: '0.5rem' }}>
+          When enabled, the app will check for pre-release versions (beta, alpha, etc.) in addition to stable releases.
+        </p>
       </section>
 
       {/* Actions */}

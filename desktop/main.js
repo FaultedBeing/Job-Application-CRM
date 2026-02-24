@@ -10,28 +10,34 @@ let serverProcess;
 let tray;
 let isQuitting = false;
 
-// User preference for Node.js (default: bundled/self-contained)
-function getNodeJsPreference() {
-  const configPath = path.join(app.getPath('userData'), 'app-config.json');
-  try {
-    if (fs.existsSync(configPath)) {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      return config.useSystemNodeJs === true; // Default to false (bundled)
-    }
-  } catch (error) {
-    console.error('Error reading config:', error);
-  }
-  return false; // Default: use bundled Node.js
-}
 
-function setNodeJsPreference(useSystemNode) {
-  const configPath = path.join(app.getPath('userData'), 'app-config.json');
-  try {
-    const config = { useSystemNodeJs: useSystemNode };
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  } catch (error) {
-    console.error('Error writing config:', error);
-  }
+function loadPrereleaseSetting() {
+  // Load allow_prerelease setting from database via API
+  // Wait for server to be ready, then fetch setting
+  setTimeout(() => {
+    http.get('http://localhost:3000/api/settings', (res) => {
+      let data = '';
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      res.on('end', () => {
+        try {
+          const settings = JSON.parse(data);
+          const allowPrerelease = settings.allow_prerelease === 'true';
+          autoUpdater.allowPrerelease = allowPrerelease;
+          console.log('[Auto-updater] allowPrerelease set to:', allowPrerelease);
+        } catch (error) {
+          console.error('[Auto-updater] Error parsing settings:', error);
+          // Default to false if can't read setting
+          autoUpdater.allowPrerelease = false;
+        }
+      });
+    }).on('error', (error) => {
+      console.error('[Auto-updater] Error fetching settings:', error);
+      // Default to false if can't fetch
+      autoUpdater.allowPrerelease = false;
+    });
+  }, 6000); // Wait 6 seconds for server to be ready
 }
 
 function showFirstBootWelcome() {
@@ -141,90 +147,35 @@ function createTray() {
       const emptyIcon = nativeImage.createEmpty();
       tray = new Tray(emptyIcon);
     }
-    function buildTrayMenu() {
-      const useSystemNode = getNodeJsPreference();
-      return Menu.buildFromTemplate([
-        {
-          label: 'Show',
-          click: () => {
-            if (mainWindow) {
-              mainWindow.show();
-            }
-          }
-        },
-        {
-          type: 'separator'
-        },
-        {
-          label: 'Node.js: ' + (useSystemNode ? 'System' : 'Bundled'),
-          submenu: [
-            {
-              label: 'Use Bundled Node.js',
-              type: 'radio',
-              checked: !useSystemNode,
-              click: () => {
-                setNodeJsPreference(false);
-                if (mainWindow) {
-                  dialog.showMessageBox(mainWindow, {
-                    type: 'info',
-                    title: 'Setting Changed',
-                    message: 'Node.js preference updated to Bundled.',
-                    detail: 'Please restart the application for this change to take effect.',
-                    buttons: ['OK']
-                  });
-                }
-                // Rebuild menu to reflect change
-                if (tray) {
-                  tray.setContextMenu(buildTrayMenu());
-                }
-              }
-            },
-            {
-              label: 'Use System Node.js',
-              type: 'radio',
-              checked: useSystemNode,
-              click: () => {
-                setNodeJsPreference(true);
-                if (mainWindow) {
-                  dialog.showMessageBox(mainWindow, {
-                    type: 'info',
-                    title: 'Setting Changed',
-                    message: 'Node.js preference updated to System.',
-                    detail: 'Please restart the application for this change to take effect.',
-                    buttons: ['OK']
-                  });
-                }
-                // Rebuild menu to reflect change
-                if (tray) {
-                  tray.setContextMenu(buildTrayMenu());
-                }
-              }
-            }
-          ]
-        },
-        {
-          type: 'separator'
-        },
-        {
-          label: 'Check for Updates',
-          click: () => {
-            checkForUpdates(true);
-          }
-        },
-        {
-          type: 'separator'
-        },
-        {
-          label: 'Quit',
-          click: () => {
-            isQuitting = true;
-            app.quit();
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Show',
+        click: () => {
+          if (mainWindow) {
+            mainWindow.show();
           }
         }
-      ]);
-    }
-    
-    const contextMenu = buildTrayMenu();
+      },
+      {
+        type: 'separator'
+      },
+      {
+        label: 'Check for Updates',
+        click: () => {
+          checkForUpdates(true);
+        }
+      },
+      {
+        type: 'separator'
+      },
+      {
+        label: 'Quit',
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        }
+      }
+    ]);
     tray.setToolTip('Job Application Tracker');
     tray.setContextMenu(contextMenu);
     tray.on('double-click', () => {
@@ -422,49 +373,19 @@ function startServer() {
   // Set NODE_PATH to include server node_modules
   env.NODE_PATH = nodeModulesPath;
 
-  // Determine which Node.js to use based on user preference
+  // Always use bundled Node.js (self-contained, no dependencies required)
   let nodeExecutable = 'node'; // Default to system node (for development)
   
   if (app.isPackaged) {
-    const useSystemNode = getNodeJsPreference();
-    const { execSync } = require('child_process');
-    
-    if (useSystemNode) {
-      // User prefers system Node.js - check if available
-      let systemNodeAvailable = false;
-      try {
-        execSync('node --version', { stdio: 'ignore', timeout: 1000 });
-        systemNodeAvailable = true;
-      } catch (error) {
-        systemNodeAvailable = false;
-      }
-      
-      if (systemNodeAvailable) {
-        nodeExecutable = 'node';
-        console.log('Using system Node.js (user preference)');
-      } else {
-        // System Node.js not available, fall back to bundled
-        console.warn('System Node.js not found, falling back to bundled');
-        const bundledNodePath = path.join(process.resourcesPath, 'node.exe');
-        if (fs.existsSync(bundledNodePath)) {
-          nodeExecutable = bundledNodePath;
-          console.log('Using bundled Node.js (fallback)');
-        } else {
-          console.error('Neither system nor bundled Node.js available!');
-          nodeExecutable = 'node'; // Last resort
-        }
-      }
+    // In production, always use bundled Node.js
+    const bundledNodePath = path.join(process.resourcesPath, 'node.exe');
+    if (fs.existsSync(bundledNodePath)) {
+      nodeExecutable = bundledNodePath;
+      console.log('Using bundled Node.js');
     } else {
-      // User prefers bundled Node.js (default)
-      const bundledNodePath = path.join(process.resourcesPath, 'node.exe');
-      if (fs.existsSync(bundledNodePath)) {
-        nodeExecutable = bundledNodePath;
-        console.log('Using bundled Node.js (user preference)');
-      } else {
-        // Bundled not available, try system as fallback
-        console.warn('Bundled Node.js not found, trying system Node.js');
-        nodeExecutable = 'node';
-      }
+      // Fallback to system node if bundled not available (shouldn't happen)
+      console.warn('Bundled Node.js not found, falling back to system Node.js');
+      nodeExecutable = 'node';
     }
   }
 
@@ -504,6 +425,10 @@ function setupAutoUpdater() {
       owner: 'FaultedBeing',
       repo: 'Job-Application-CRM'
     });
+    
+    // Load allow_prerelease setting from database
+    loadPrereleaseSetting();
+    
     console.log('[Auto-updater] Configured with: FaultedBeing/Job-Application-CRM');
   } catch (error) {
     console.error('[Auto-updater] Error configuring:', error);
@@ -562,6 +487,9 @@ function setupAutoUpdater() {
     });
   });
 
+  // Load prerelease setting first, then check for updates
+  loadPrereleaseSetting();
+  
   // Check for updates on startup (after a delay to not interfere with app startup)
   // GitHub repo is hardcoded in checkForUpdates, so we can always check
   setTimeout(() => {
