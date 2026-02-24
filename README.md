@@ -7,7 +7,7 @@ A standalone desktop application for managing job applications, companies, conta
 ### Download and Install
 
 1. **Download the installer:**
-   - Go to [Releases](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/releases)
+   - Go to [Releases](https://github.com/FaultedBeing/Job-Application-CRM/releases)
    - Download the latest `Job Application Tracker Setup [version].exe`
    - Or download from the root folder of this repository
 
