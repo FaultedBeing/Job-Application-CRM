@@ -28,3 +28,32 @@ button {
 input, textarea, select {
   font-family: inherit;
 }
+
+/* Custom scrollbar styling to match dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f1115;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2d3139;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3b4049;
+}
+
+::-webkit-scrollbar-corner {
+  background: #0f1115;
+}
+
+/* For Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2d3139 #0f1115;
+}

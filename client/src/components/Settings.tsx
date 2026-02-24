@@ -139,6 +139,20 @@ export default function Settings() {
     }
   }
 
+  function handleCheckForUpdates() {
+    try {
+      const anyWindow = window as any;
+      if (anyWindow.electronAPI && typeof anyWindow.electronAPI.checkForUpdates === 'function') {
+        anyWindow.electronAPI.checkForUpdates();
+      } else {
+        alert('Update check is only available in the desktop app.');
+      }
+    } catch (error) {
+      console.error('Error triggering update check from settings:', error);
+      alert('Unable to trigger update check right now.');
+    }
+  }
+
   return (
     <div>
       <h1 style={{ fontSize: '2rem', marginBottom: '2rem', color: '#fbbf24' }}>Settings</h1>
@@ -239,7 +253,6 @@ export default function Settings() {
         <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '1rem' }}>
           These options are used for the <strong>Industry</strong> dropdown when adding or editing companies.
         </p>
-        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>Version v1.1.0</p>
         <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
           <input
             type="text"
@@ -332,7 +345,7 @@ export default function Settings() {
       {/* Auto-Update Settings */}
       <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
         <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>Auto-Update Settings</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', color: '#e5e7eb' }}>
             <input
               type="checkbox"
@@ -347,11 +360,26 @@ export default function Settings() {
             />
             <span>Include pre-releases when checking for updates</span>
           </label>
+          <button
+            onClick={handleCheckForUpdates}
+            style={{
+              padding: '0.5rem 1.25rem',
+              backgroundColor: '#3b82f6',
+              border: 'none',
+              borderRadius: '6px',
+              color: '#fff',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              fontSize: '0.9rem'
+            }}
+          >
+            Check for Updates
+          </button>
         </div>
         <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginTop: '0.5rem' }}>
           When enabled, the app will check for pre-release versions (beta, alpha, etc.) in addition to stable releases.
         </p>
-        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>Version v1.1.0</p>
+        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>Version v1.1.2</p>
       </section>
 
       {/* Actions */}
