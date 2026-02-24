@@ -427,6 +427,9 @@ function checkForUpdates(showNoUpdateMessage = false) {
 }
 
 app.whenReady().then(() => {
+  // Remove the menu bar (File, Edit, View, Window, Help)
+  Menu.setApplicationMenu(null);
+  
   createTray();
   createWindow();
   setupAutoUpdater();

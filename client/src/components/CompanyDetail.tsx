@@ -44,8 +44,8 @@ export default function CompanyDetail() {
   function formatWebsiteDisplay(url?: string | null) {
     if (!url) return '';
     let display = url.trim();
+    // Only remove https://, keep www.
     display = display.replace(/^https?:\/\//i, '');
-    display = display.replace(/^www\./i, '');
     return display;
   }
 

@@ -227,11 +227,11 @@ export default function Settings() {
         </div>
       </section>
 
-      {/* Space Industry Categories */}
+      {/* Industry Categories */}
       <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
-        <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>Space Industry Categories</h2>
+        <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>Industry Categories</h2>
         <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '1rem' }}>
-          These options are used for the <strong>Industry</strong> dropdown when adding or editing companies. Focus them on aerospace and space‑sector subsectors that match your search focus.
+          These options are used for the <strong>Industry</strong> dropdown when adding or editing companies.
         </p>
         <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
           <input
@@ -239,7 +239,7 @@ export default function Settings() {
             value={newIndustry}
             onChange={(e) => setNewIndustry(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && addIndustry()}
-            placeholder="Add new space industry category"
+            placeholder="Add new industry category"
             style={{
               flex: 1,
               maxWidth: '400px',
@@ -264,6 +264,26 @@ export default function Settings() {
           >
             Add
           </button>
+          {industries.length > 0 && (
+            <button
+              onClick={() => {
+                if (confirm('Are you sure you want to clear all industry categories?')) {
+                  setIndustries([]);
+                }
+              }}
+              style={{
+                padding: '0.75rem 1.5rem',
+                backgroundColor: '#ef4444',
+                border: 'none',
+                borderRadius: '6px',
+                color: '#fff',
+                fontWeight: 'bold',
+                cursor: 'pointer'
+              }}
+            >
+              Clear All
+            </button>
+          )}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
           {industries.map((industry) => (
@@ -297,7 +317,7 @@ export default function Settings() {
             </div>
           ))}
           {industries.length === 0 && (
-            <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>No categories yet. Add some space industry subsectors to get started.</p>
+            <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>No categories yet. Add some industry categories to get started.</p>
           )}
         </div>
       </section>

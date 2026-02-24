@@ -33,6 +33,21 @@ export default function Companies() {
     }
   }
 
+  function formatWebsiteDisplay(url?: string | null) {
+    if (!url) return '';
+    let display = url.trim();
+    // Only remove https://, keep www.
+    display = display.replace(/^https?:\/\//i, '');
+    return display;
+  }
+
+  function getWebsiteHref(url?: string | null) {
+    if (!url) return '#';
+    const trimmed = url.trim();
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    return `https://${trimmed}`;
+  }
+
   const sortedCompanies = [...companies].sort((a, b) => {
     if (sortBy === 'name') {
       return a.name.localeCompare(b.name);
@@ -146,13 +161,13 @@ export default function Companies() {
             )}
             {company.website && (
               <a
-                href={company.website}
+                href={getWebsiteHref(company.website)}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
                 style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}
               >
-                {company.website}
+                {formatWebsiteDisplay(company.website)}
               </a>
             )}
             <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
