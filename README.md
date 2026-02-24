@@ -2,7 +2,7 @@
 
 A standalone desktop application for managing job applications, companies, contacts, and interactions throughout your job search process.
 
-## 🚀 Quick Start (For End Users)
+## Quick Start (For End Users)
 
 ### Download and Install
 
@@ -21,7 +21,6 @@ A standalone desktop application for managing job applications, companies, conta
    - Open from Start Menu or Desktop shortcut
    - The app will start automatically
 
-**No technical knowledge required!** Just download, install, and use.
 
 ### Auto-Updates
 
@@ -34,7 +33,7 @@ You can also manually check for updates by right-clicking the system tray icon �
 
 ---
 
-## 📋 Features
+## Features
 
 - **Job Applications Management**: Track all your job applications with status, scores, and details
 - **Company Management**: Automatically creates companies when adding jobs, with logo fetching
@@ -49,7 +48,7 @@ You can also manually check for updates by right-clicking the system tray icon �
 
 ---
 
-## 🛠️ For Developers
+## For Developers (I hope it is for developers, this was typed with ai sooo, hope this makes sense to actual developers or is helpfull at all. This thing is vibed to all hell, but I'm trying here)
 
 ### Prerequisites
 
@@ -131,13 +130,13 @@ Job-Application-CRM/
 
 ---
 
-## 📦 Releases
+## Releases
 
 New versions are released on [GitHub Releases](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/releases). The app will automatically notify you when updates are available.
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 **App won't start?**
 - Make sure no other instance is running
@@ -156,18 +155,14 @@ New versions are released on [GitHub Releases](https://github.com/YOUR_USERNAME/
 
 ---
 
-## 📝 License
+## License
 
 MIT
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 This is a personal project, but feel free to fork and modify for your own use!
 
----
 
-## 📧 Support
-
-For issues or questions, please open an issue on GitHub.
