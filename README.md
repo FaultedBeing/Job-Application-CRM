@@ -1,135 +1,173 @@
 # Job Application Tracker
 
-A standalone desktop application for managing job applications, companies, contacts, and interactions throughout the job search process.
+A standalone desktop application for managing job applications, companies, contacts, and interactions throughout your job search process.
 
-## Quick Start (For End Users)
+## 🚀 Quick Start (For End Users)
 
-**Just download and run the installer!**
+### Download and Install
 
-1. Download `Job Application Tracker Setup [version].exe` from the root folder of this repository (or from [Releases](https://github.com/YOUR_USERNAME/REPO_NAME/releases))
-2. Run the installer
-3. Choose installation location and options
-4. Launch from Start Menu or Desktop shortcut
+1. **Download the installer:**
+   - Go to [Releases](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/releases)
+   - Download the latest `Job Application Tracker Setup [version].exe`
+   - Or download from the root folder of this repository
 
-**No building or technical knowledge required!**
+2. **Run the installer:**
+   - Double-click the downloaded `.exe` file
+   - Follow the installation wizard
+   - Choose installation location (default: `C:\Users\YourName\AppData\Local\Programs\Job Application Tracker`)
+   - Optionally create desktop and Start Menu shortcuts
 
-The installer is in the main folder for easy access.
+3. **Launch the app:**
+   - Open from Start Menu or Desktop shortcut
+   - The app will start automatically
+
+**No technical knowledge required!** Just download, install, and use.
+
+### Auto-Updates
+
+The app automatically checks for updates when you launch it. When a new version is available:
+- You'll see a notification dialog
+- Click "Download Now" to get the update
+- The app will download and prompt you to restart
+
+You can also manually check for updates by right-clicking the system tray icon → "Check for Updates"
 
 ---
 
-## For Developers
-
-## Features
+## 📋 Features
 
 - **Job Applications Management**: Track all your job applications with status, scores, and details
-- **Company Management**: Auto-creates companies when adding jobs
+- **Company Management**: Automatically creates companies when adding jobs, with logo fetching
 - **Contact Management**: Track contacts associated with companies and jobs
-- **Interaction Logging**: Log emails, calls, interviews, and notes
+- **Interaction Logging**: Log emails, calls, interviews, and notes for each contact
 - **Document Management**: Upload and manage resumes, cover letters, and other documents
 - **Dashboard**: Overview statistics and priority jobs
-- **Settings**: Customize username and status pipeline
+- **Settings**: Customize username, status pipeline, and industry categories
+- **Activity Logs**: Track interactions and set next check-in dates for contacts
+- **Company Logos**: Automatically fetches and displays company logos
+- **Industry Categories**: Space and aerospace-focused industry categorization
 
-## Development Setup
+---
+
+## 🛠️ For Developers
 
 ### Prerequisites
-- Node.js v16+
-- npm
 
-### Local Development
+- Node.js v16+ ([Download](https://nodejs.org/))
+- npm (comes with Node.js)
 
-1. **Install dependencies:**
+### Development Setup
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+   cd YOUR_REPO_NAME
+   ```
+
+2. **Install dependencies:**
    ```bash
    cd server && npm install
    cd ../client && npm install
    cd ../desktop && npm install
    ```
 
-2. **Start backend:**
+3. **Start development servers:**
+   
+   **Backend (Terminal 1):**
    ```bash
    cd server
    npm run dev
    ```
-
-3. **Start frontend (in a new terminal):**
+   
+   **Frontend (Terminal 2):**
    ```bash
    cd client
    npm run dev
    ```
+   
+   The app will be available at http://localhost:5173
 
-4. **Access the app:**
-   - Frontend: http://localhost:5173
-   - Backend API: http://localhost:3000
+### Building the Installer
 
-## Building the Installer (For Developers Only)
+**Easy way (Recommended):**
+- Just run `BUILD.exe.bat` from the root folder
+- It will install dependencies, build everything, and create the installer
 
-**Note:** End users don't need to do this! They just download and run the installer from Releases.
+**Manual way:**
+```bash
+# Build server
+cd server
+npm run build
 
-### Quick Build
+# Build client
+cd ../client
+npm run build
 
-**Just double-click `BUILD.exe.bat`** - it will:
-- Check for Node.js
-- Install all dependencies
-- Build everything
-- Create the executable
-
-The **installer** will be in `desktop/dist/Job Application Tracker Setup [version].exe`
-
-**What you get:**
-- ✅ **`Job Application Tracker Setup [version].exe`** - Windows installer (run this to install)
-- The installer lets you choose:
-  - Where to install the app
-  - Create desktop shortcut (optional)
-  - Create Start Menu shortcut (optional)
-- After installation, you can uninstall from Windows Settings → Apps
-
-**Note:** The `win-unpacked/` folder is just for development - ignore it.
-
-### Manual Build
-
-If you prefer to build manually:
-
-1. **Build frontend:**
-   ```bash
-   cd client
-   npm install
-   npm run build
-   ```
-
-2. **Build backend:**
-   ```bash
-   cd server
-   npm install
-   npm run build
-   ```
-
-3. **Package with Electron:**
-   ```bash
-   cd desktop
-   npm install
-   npm run build
-   ```
-
-4. **Output:**
-   The installer will be in `desktop/dist/Job Application Tracker Setup [version].exe`
-   Run the installer to install the application with options for location and shortcuts.
-
-## Project Structure
-
-```
-project/
-├── client/          # React frontend
-├── server/          # Express backend
-└── desktop/         # Electron wrapper
+# Build installer
+cd ../desktop
+npm run build
 ```
 
-## Technology Stack
+The installer will be created in the root folder: `Job Application Tracker Setup [version].exe`
+
+### Project Structure
+
+```
+Job-Application-CRM/
+├── client/          # React frontend (TypeScript + Vite)
+├── server/          # Express backend (TypeScript)
+├── desktop/         # Electron wrapper
+├── BUILD.exe.bat    # One-click build script
+└── README.md        # This file
+```
+
+### Technology Stack
 
 - **Frontend**: React 18 + TypeScript + Vite
 - **Backend**: Node.js + Express + TypeScript
-- **Database**: SQLite
+- **Database**: SQLite (file-based, no server needed)
 - **Desktop**: Electron
 - **Icons**: Lucide React
 
-## License
+---
+
+## 📦 Releases
+
+New versions are released on [GitHub Releases](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/releases). The app will automatically notify you when updates are available.
+
+---
+
+## 🐛 Troubleshooting
+
+**App won't start?**
+- Make sure no other instance is running
+- Check Windows Task Manager for any stuck processes
+- Try restarting your computer
+
+**Update check fails?**
+- Check your internet connection
+- Verify the GitHub repository is accessible
+- Make sure you're running a version that was installed from a GitHub Release
+
+**Database issues?**
+- The database is stored in: `C:\Users\YourName\AppData\Roaming\job-tracker-desktop\database.sqlite`
+- You can backup this file to save your data
+- Deleting it will reset the app (you'll lose all data)
+
+---
+
+## 📝 License
 
 MIT
+
+---
+
+## 🤝 Contributing
+
+This is a personal project, but feel free to fork and modify for your own use!
+
+---
+
+## 📧 Support
+
+For issues or questions, please open an issue on GitHub.

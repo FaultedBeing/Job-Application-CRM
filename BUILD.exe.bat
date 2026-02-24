@@ -1,4 +1,6 @@
 @echo off
+REM Change to script directory to ensure we're in the right place
+cd /d "%~dp0"
 echo ========================================
 echo Job Application Tracker - Build Script
 echo ========================================
@@ -76,12 +78,23 @@ echo Close any open instances of "Job Application Tracker" before building.
 echo.
 timeout /t 3 /nobreak >nul
 
+REM Clean up old installer versions from root folder
+echo Cleaning up old installer versions...
+for %%f in ("Job Application Tracker Setup*.exe") do (
+    echo Removing old installer: %%f
+    del /q "%%f" 2>nul
+)
+for %%f in ("Job Application Tracker Setup*.exe.blockmap") do (
+    del /q "%%f" 2>nul
+)
+
 REM Try to clean the dist folder (ignore errors if files are locked)
 cd desktop
 if exist dist\win-unpacked (
     echo Cleaning old build files...
     rmdir /s /q dist\win-unpacked 2>nul
     del /q dist\*.exe 2>nul
+    del /q dist\*.blockmap 2>nul
 )
 
 call npm run build
@@ -104,29 +117,10 @@ echo ========================================
 echo Build Complete!
 echo ========================================
 echo.
-
-REM Copy installer to root folder for easy access
-cd desktop\dist
-for /f "delims=" %%f in ('dir /b "Job Application Tracker Setup*.exe" 2^>nul') do (
-    copy "%%f" "..\..\" >nul 2>&1
-    if exist "..\..\%%f" (
-        echo Installer copied to root folder: %%f
-        set INSTALLER_FOUND=1
-    )
-)
-cd ..\..
-
-if defined INSTALLER_FOUND (
-    echo.
-    echo Your installer is located at:
-    echo   - Root folder: Job Application Tracker Setup [version].exe (easy to find!)
-    echo   - Also in: desktop\dist\Job Application Tracker Setup [version].exe
-) else (
-    echo.
-    echo Your installer is located at:
-    echo   desktop\dist\Job Application Tracker Setup [version].exe
-    echo   (Could not copy to root - check dist folder)
-)
+echo.
+echo Your installer is located in the root folder:
+echo   Job Application Tracker Setup [version].exe
+echo.
 echo.
 echo Run the installer to install the application!
 echo It will create shortcuts in Start Menu and Desktop.

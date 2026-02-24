@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 
 # Build outputs
 dist/
@@ -8,9 +7,8 @@ build/
 win-unpacked/
 *.asar
 
-# Exclude .exe files EXCEPT the installer in root folder
+# Exclude all .exe files (upload installers to GitHub Releases instead)
 *.exe
-!Job Application Tracker Setup *.exe
 
 # Database files (user data - don't commit)
 *.sqlite
@@ -48,19 +46,17 @@ desktop.ini
 *.swo
 *~
 
-# Electron
-out/
-dist/
-*.exe
-win-unpacked/
-mac/
-linux/
+# Electron builder artifacts (not needed in repo)
+builder-debug.yml
+builder-effective-config.yaml
+latest.yml
+*.blockmap
 
 # Temporary files
 *.tmp
 *.temp
 .cache/
 
-# Documentation (user-specific setup guides)
-GITHUB_SETUP.md
-START_HERE.md
+# Documentation (exclude all markdown files except README.md)
+*.md
+!README.md

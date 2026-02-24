@@ -1,13 +1,18 @@
-const { app, BrowserWindow, Tray, Menu } = require('electron');
+const { app, BrowserWindow, Tray, Menu, dialog } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
+const { autoUpdater } = require('electron-updater');
 
 let mainWindow;
 let serverProcess;
 let tray;
 let isQuitting = false;
+
+// Configure auto-updater
+autoUpdater.autoDownload = false; // Don't auto-download, let user choose
+autoUpdater.autoInstallOnAppQuit = true; // Install on quit if update is ready
 
 function createTray() {
   if (tray) return;
@@ -81,6 +86,18 @@ function createTray() {
             mainWindow.show();
           }
         }
+      },
+      {
+        type: 'separator'
+      },
+      {
+        label: 'Check for Updates',
+        click: () => {
+          checkForUpdates(true);
+        }
+      },
+      {
+        type: 'separator'
       },
       {
         label: 'Quit',
@@ -307,9 +324,112 @@ function startServer() {
   });
 }
 
+// Auto-updater event handlers
+function setupAutoUpdater() {
+  if (!app.isPackaged) {
+    // Skip auto-updates in development
+    return;
+  }
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('Checking for updates...');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('Update available:', info.version);
+    if (mainWindow) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Update Available',
+        message: `A new version (${info.version}) is available!`,
+        detail: 'Would you like to download and install it now?',
+        buttons: ['Download Now', 'Later'],
+        defaultId: 0,
+        cancelId: 1
+      }).then((result) => {
+        if (result.response === 0) {
+          autoUpdater.downloadUpdate();
+        }
+      });
+    }
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    console.log('Update not available. Current version is latest.');
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('Error in auto-updater:', err);
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    let logMessage = `Download speed: ${progressObj.bytesPerSecond} - Downloaded ${progressObj.percent}% (${progressObj.transferred}/${progressObj.total})`;
+    console.log(logMessage);
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('Update downloaded');
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update Ready',
+      message: 'Update downloaded successfully!',
+      detail: 'The application will restart to install the update.',
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0,
+      cancelId: 1
+    }).then((result) => {
+      if (result.response === 0) {
+        autoUpdater.quitAndInstall(false, true);
+      }
+    });
+  });
+
+  // Check for updates on startup (after a delay to not interfere with app startup)
+  setTimeout(() => {
+    checkForUpdates(false);
+  }, 5000); // Check 5 seconds after app starts
+}
+
+function checkForUpdates(showNoUpdateMessage = false) {
+  if (!app.isPackaged) {
+    if (showNoUpdateMessage) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Development Mode',
+        message: 'Auto-updates are disabled in development mode.',
+        buttons: ['OK']
+      });
+    }
+    return;
+  }
+
+  autoUpdater.checkForUpdates().then((result) => {
+    if (showNoUpdateMessage && !result.updateInfo) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'No Updates',
+        message: 'You are running the latest version!',
+        buttons: ['OK']
+      });
+    }
+  }).catch((err) => {
+    console.error('Error checking for updates:', err);
+    if (showNoUpdateMessage) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'error',
+        title: 'Update Check Failed',
+        message: 'Could not check for updates.',
+        detail: err.message,
+        buttons: ['OK']
+      });
+    }
+  });
+}
+
 app.whenReady().then(() => {
   createTray();
   createWindow();
+  setupAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
