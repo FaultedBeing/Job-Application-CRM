@@ -34,6 +34,45 @@ function setNodeJsPreference(useSystemNode) {
   }
 }
 
+function showFirstBootWelcome() {
+  if (!app.isPackaged) {
+    // Skip in development
+    return;
+  }
+  
+  const welcomeFlagPath = path.join(app.getPath('userData'), '.welcome-shown');
+  
+  // Check if welcome has been shown before
+  if (fs.existsSync(welcomeFlagPath)) {
+    return;
+  }
+  
+  // Wait for window to be ready, then show welcome
+  setTimeout(() => {
+    if (mainWindow) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Welcome to Job Application Tracker!',
+        message: 'Quick Tip: Minimizing to Tray',
+        detail: 'When you close the window using the X button, the app will minimize to the system tray and continue running in the background.\n\n' +
+                'To fully quit the application:\n' +
+                '• Right-click the tray icon (in your system tray)\n' +
+                '• Select "Quit"\n\n' +
+                'This allows the app to keep running so you can quickly access it again!',
+        buttons: ['Got it!'],
+        defaultId: 0
+      }).then(() => {
+        // Mark welcome as shown
+        try {
+          fs.writeFileSync(welcomeFlagPath, '1');
+        } catch (error) {
+          console.error('Error saving welcome flag:', error);
+        }
+      });
+    }
+  }, 2000); // Wait 2 seconds after window loads
+}
+
 // Configure auto-updater
 autoUpdater.autoDownload = false; // Don't auto-download, let user choose
 autoUpdater.autoInstallOnAppQuit = true; // Install on quit if update is ready
@@ -456,6 +495,20 @@ function setupAutoUpdater() {
     return;
   }
 
+  // Configure electron-updater with GitHub repo info directly
+  // Hardcoded here since electron-builder strips the 'build' section from package.json
+  // This matches the publish config in package.json: FaultedBeing/Job-Application-CRM
+  try {
+    autoUpdater.setFeedURL({
+      provider: 'github',
+      owner: 'FaultedBeing',
+      repo: 'Job-Application-CRM'
+    });
+    console.log('[Auto-updater] Configured with: FaultedBeing/Job-Application-CRM');
+  } catch (error) {
+    console.error('[Auto-updater] Error configuring:', error);
+  }
+
   autoUpdater.on('checking-for-update', () => {
     console.log('Checking for updates...');
   });
@@ -510,6 +563,7 @@ function setupAutoUpdater() {
   });
 
   // Check for updates on startup (after a delay to not interfere with app startup)
+  // GitHub repo is hardcoded in checkForUpdates, so we can always check
   setTimeout(() => {
     checkForUpdates(false);
   }, 5000); // Check 5 seconds after app starts
@@ -528,6 +582,35 @@ function checkForUpdates(showNoUpdateMessage = false) {
     return;
   }
 
+  // GitHub repo is hardcoded here since electron-builder strips build section from package.json
+  // This matches the publish config in package.json
+  const GITHUB_OWNER = 'FaultedBeing';
+  const GITHUB_REPO = 'Job-Application-CRM';
+  
+  // Check if autoUpdater was configured (it should be set in setupAutoUpdater)
+  // If not configured yet, configure it now
+  try {
+    // Try to get current config, if not set, set it
+    autoUpdater.setFeedURL({
+      provider: 'github',
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO
+    });
+    console.log('[Auto-updater] Using GitHub repo:', GITHUB_OWNER, GITHUB_REPO);
+  } catch (error) {
+    console.error('[Auto-updater] Error configuring:', error);
+    if (showNoUpdateMessage) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'error',
+        title: 'Update Check Failed',
+        message: 'Could not configure auto-updater.',
+        detail: error.message,
+        buttons: ['OK']
+      });
+    }
+    return;
+  }
+
   autoUpdater.checkForUpdates().then((result) => {
     if (showNoUpdateMessage && !result.updateInfo) {
       dialog.showMessageBox(mainWindow, {
@@ -539,12 +622,33 @@ function checkForUpdates(showNoUpdateMessage = false) {
     }
   }).catch((err) => {
     console.error('Error checking for updates:', err);
+    // Only show error if user explicitly requested update check
     if (showNoUpdateMessage) {
+      let errorMessage = 'Could not check for updates.';
+      let errorDetail = '';
+      
+      // Parse the error to provide helpful messages
+      const errMsg = err.message || err.toString() || '';
+      
+      if (errMsg.includes('406') || errMsg.includes('Not Acceptable') || 
+          errMsg.includes('Unable to find latest version')) {
+        // No releases yet - just tell user they're up to date
+        errorMessage = 'You are up to date!';
+        errorDetail = 'You are running the latest version of the application.';
+      } else if (errMsg.includes('404') || errMsg.includes('Not Found')) {
+        errorMessage = 'You are up to date!';
+        errorDetail = 'You are running the latest version of the application.';
+      } else {
+        // For other errors, show a simplified message
+        errorMessage = 'Update check unavailable.';
+        errorDetail = 'Unable to check for updates at this time. You can continue using the app normally.';
+      }
+      
       dialog.showMessageBox(mainWindow, {
-        type: 'error',
-        title: 'Update Check Failed',
-        message: 'Could not check for updates.',
-        detail: err.message,
+        type: 'info',
+        title: 'Update Check',
+        message: errorMessage,
+        detail: errorDetail,
         buttons: ['OK']
       });
     }
@@ -558,6 +662,7 @@ app.whenReady().then(() => {
   createTray();
   createWindow();
   setupAutoUpdater();
+  showFirstBootWelcome();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

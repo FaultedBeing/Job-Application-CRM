@@ -1,6 +1,6 @@
 {
   "name": "job-tracker-desktop",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Desktop wrapper for Job Application Tracker",
   "main": "main.js",
   "scripts": {
@@ -16,8 +16,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "YOUR_GITHUB_USERNAME",
-      "repo": "YOUR_REPO_NAME"
+      "owner": "FaultedBeing",
+      "repo": "Job-Application-CRM"
     },
     "win": {
       "target": [
