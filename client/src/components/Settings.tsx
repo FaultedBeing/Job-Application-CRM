@@ -239,6 +239,7 @@ export default function Settings() {
         <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '1rem' }}>
           These options are used for the <strong>Industry</strong> dropdown when adding or editing companies.
         </p>
+        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>Version v1.1.0</p>
         <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
           <input
             type="text"
@@ -350,6 +351,7 @@ export default function Settings() {
         <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginTop: '0.5rem' }}>
           When enabled, the app will check for pre-release versions (beta, alpha, etc.) in addition to stable releases.
         </p>
+        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>Version v1.1.0</p>
       </section>
 
       {/* Actions */}

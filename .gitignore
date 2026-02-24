@@ -64,3 +64,5 @@ desktop/node.zip
 # Documentation (exclude all markdown files except README.md)
 *.md
 !README.md
+!START_HERE.md
+!GITHUB_SETUP.md
