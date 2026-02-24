@@ -57,6 +57,10 @@ latest.yml
 *.temp
 .cache/
 
+# Node.js portable (downloaded during build)
+desktop/node-portable/
+desktop/node.zip
+
 # Documentation (exclude all markdown files except README.md)
 *.md
 !README.md

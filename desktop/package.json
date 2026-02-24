@@ -1,9 +1,10 @@
 {
   "name": "job-tracker-desktop",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Desktop wrapper for Job Application Tracker",
   "main": "main.js",
   "scripts": {
+    "prebuild": "node download-node.js",
     "start": "electron .",
     "build": "electron-builder"
   },
@@ -70,6 +71,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "node-portable/node.exe",
+        "to": "node.exe"
       },
       {
         "from": "icon.ico",

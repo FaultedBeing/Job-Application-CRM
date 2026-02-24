@@ -10,6 +10,30 @@ let serverProcess;
 let tray;
 let isQuitting = false;
 
+// User preference for Node.js (default: bundled/self-contained)
+function getNodeJsPreference() {
+  const configPath = path.join(app.getPath('userData'), 'app-config.json');
+  try {
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      return config.useSystemNodeJs === true; // Default to false (bundled)
+    }
+  } catch (error) {
+    console.error('Error reading config:', error);
+  }
+  return false; // Default: use bundled Node.js
+}
+
+function setNodeJsPreference(useSystemNode) {
+  const configPath = path.join(app.getPath('userData'), 'app-config.json');
+  try {
+    const config = { useSystemNodeJs: useSystemNode };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  } catch (error) {
+    console.error('Error writing config:', error);
+  }
+}
+
 // Configure auto-updater
 autoUpdater.autoDownload = false; // Don't auto-download, let user choose
 autoUpdater.autoInstallOnAppQuit = true; // Install on quit if update is ready
@@ -78,35 +102,90 @@ function createTray() {
       const emptyIcon = nativeImage.createEmpty();
       tray = new Tray(emptyIcon);
     }
-    const contextMenu = Menu.buildFromTemplate([
-      {
-        label: 'Show',
-        click: () => {
-          if (mainWindow) {
-            mainWindow.show();
+    function buildTrayMenu() {
+      const useSystemNode = getNodeJsPreference();
+      return Menu.buildFromTemplate([
+        {
+          label: 'Show',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.show();
+            }
+          }
+        },
+        {
+          type: 'separator'
+        },
+        {
+          label: 'Node.js: ' + (useSystemNode ? 'System' : 'Bundled'),
+          submenu: [
+            {
+              label: 'Use Bundled Node.js',
+              type: 'radio',
+              checked: !useSystemNode,
+              click: () => {
+                setNodeJsPreference(false);
+                if (mainWindow) {
+                  dialog.showMessageBox(mainWindow, {
+                    type: 'info',
+                    title: 'Setting Changed',
+                    message: 'Node.js preference updated to Bundled.',
+                    detail: 'Please restart the application for this change to take effect.',
+                    buttons: ['OK']
+                  });
+                }
+                // Rebuild menu to reflect change
+                if (tray) {
+                  tray.setContextMenu(buildTrayMenu());
+                }
+              }
+            },
+            {
+              label: 'Use System Node.js',
+              type: 'radio',
+              checked: useSystemNode,
+              click: () => {
+                setNodeJsPreference(true);
+                if (mainWindow) {
+                  dialog.showMessageBox(mainWindow, {
+                    type: 'info',
+                    title: 'Setting Changed',
+                    message: 'Node.js preference updated to System.',
+                    detail: 'Please restart the application for this change to take effect.',
+                    buttons: ['OK']
+                  });
+                }
+                // Rebuild menu to reflect change
+                if (tray) {
+                  tray.setContextMenu(buildTrayMenu());
+                }
+              }
+            }
+          ]
+        },
+        {
+          type: 'separator'
+        },
+        {
+          label: 'Check for Updates',
+          click: () => {
+            checkForUpdates(true);
+          }
+        },
+        {
+          type: 'separator'
+        },
+        {
+          label: 'Quit',
+          click: () => {
+            isQuitting = true;
+            app.quit();
           }
         }
-      },
-      {
-        type: 'separator'
-      },
-      {
-        label: 'Check for Updates',
-        click: () => {
-          checkForUpdates(true);
-        }
-      },
-      {
-        type: 'separator'
-      },
-      {
-        label: 'Quit',
-        click: () => {
-          isQuitting = true;
-          app.quit();
-        }
-      }
-    ]);
+      ]);
+    }
+    
+    const contextMenu = buildTrayMenu();
     tray.setToolTip('Job Application Tracker');
     tray.setContextMenu(contextMenu);
     tray.on('double-click', () => {
@@ -304,6 +383,52 @@ function startServer() {
   // Set NODE_PATH to include server node_modules
   env.NODE_PATH = nodeModulesPath;
 
+  // Determine which Node.js to use based on user preference
+  let nodeExecutable = 'node'; // Default to system node (for development)
+  
+  if (app.isPackaged) {
+    const useSystemNode = getNodeJsPreference();
+    const { execSync } = require('child_process');
+    
+    if (useSystemNode) {
+      // User prefers system Node.js - check if available
+      let systemNodeAvailable = false;
+      try {
+        execSync('node --version', { stdio: 'ignore', timeout: 1000 });
+        systemNodeAvailable = true;
+      } catch (error) {
+        systemNodeAvailable = false;
+      }
+      
+      if (systemNodeAvailable) {
+        nodeExecutable = 'node';
+        console.log('Using system Node.js (user preference)');
+      } else {
+        // System Node.js not available, fall back to bundled
+        console.warn('System Node.js not found, falling back to bundled');
+        const bundledNodePath = path.join(process.resourcesPath, 'node.exe');
+        if (fs.existsSync(bundledNodePath)) {
+          nodeExecutable = bundledNodePath;
+          console.log('Using bundled Node.js (fallback)');
+        } else {
+          console.error('Neither system nor bundled Node.js available!');
+          nodeExecutable = 'node'; // Last resort
+        }
+      }
+    } else {
+      // User prefers bundled Node.js (default)
+      const bundledNodePath = path.join(process.resourcesPath, 'node.exe');
+      if (fs.existsSync(bundledNodePath)) {
+        nodeExecutable = bundledNodePath;
+        console.log('Using bundled Node.js (user preference)');
+      } else {
+        // Bundled not available, try system as fallback
+        console.warn('Bundled Node.js not found, trying system Node.js');
+        nodeExecutable = 'node';
+      }
+    }
+  }
+
   // Start server process (hide console window on Windows in production)
   const spawnOptions = {
     env: env,
@@ -313,7 +438,7 @@ function startServer() {
     stdio: app.isPackaged ? ['ignore', 'ignore', 'ignore'] : 'inherit'
   };
   
-  serverProcess = spawn('node', [serverPath], spawnOptions);
+  serverProcess = spawn(nodeExecutable, [serverPath], spawnOptions);
 
   serverProcess.on('error', (error) => {
     console.error('Error starting server:', error);
