@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
+import { Search } from 'lucide-react';
 
 interface Company {
   id: number;
@@ -13,12 +14,15 @@ interface Company {
   employee_count?: number;
   company_size?: string;
   last_interaction?: string;
+  dark_logo_bg?: boolean;
+  location?: string;
 }
 
 export default function Companies() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [sortBy, setSortBy] = useState<'recent' | 'name' | 'jobs' | 'industry'>('recent');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     loadCompanies();
@@ -48,21 +52,34 @@ export default function Companies() {
     return `https://${trimmed}`;
   }
 
-  const sortedCompanies = [...companies].sort((a, b) => {
-    if (sortBy === 'name') {
-      return a.name.localeCompare(b.name);
+  const sortedCompanies = useMemo(() => {
+    let result = [...companies];
+
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      result = result.filter((c) =>
+        c.name.toLowerCase().includes(q) ||
+        (c.industry || '').toLowerCase().includes(q)
+      );
     }
-    if (sortBy === 'jobs') {
-      return (b.job_count || 0) - (a.job_count || 0);
-    }
-    if (sortBy === 'industry') {
-      return (a.industry || '').localeCompare(b.industry || '');
-    }
-    // recent (last_interaction desc)
-    const aTime = a.last_interaction ? new Date(a.last_interaction).getTime() : 0;
-    const bTime = b.last_interaction ? new Date(b.last_interaction).getTime() : 0;
-    return bTime - aTime;
-  });
+
+    result.sort((a, b) => {
+      if (sortBy === 'name') {
+        return a.name.localeCompare(b.name);
+      }
+      if (sortBy === 'jobs') {
+        return (b.job_count || 0) - (a.job_count || 0);
+      }
+      if (sortBy === 'industry') {
+        return (a.industry || '').localeCompare(b.industry || '');
+      }
+      const aTime = a.last_interaction ? new Date(a.last_interaction).getTime() : 0;
+      const bTime = b.last_interaction ? new Date(b.last_interaction).getTime() : 0;
+      return bTime - aTime;
+    });
+
+    return result;
+  }, [companies, sortBy, searchTerm]);
 
   return (
     <div>
@@ -84,18 +101,38 @@ export default function Companies() {
         </button>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.5rem' }}>
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem' }}>
+        <div style={{ position: 'relative', flex: 1 }}>
+          <Search size={20} style={{ position: 'absolute', left: '12px', top: '10px', color: '#9ca3af' }} />
+          <input
+            type="text"
+            placeholder="Search companies by name or industry..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '0.6rem 1rem 0.6rem 2.5rem',
+              backgroundColor: '#1a1d24',
+              border: '1px solid #2d3139',
+              borderRadius: '6px',
+              color: '#e5e7eb',
+              fontSize: '0.95rem'
+            }}
+          />
+        </div>
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as any)}
           style={{
-            padding: '0.5rem 1rem',
+            padding: '0.6rem 1rem',
             backgroundColor: '#1a1d24',
             border: '1px solid #2d3139',
             borderRadius: '6px',
             color: '#e5e7eb',
-            fontSize: '0.9rem',
-            cursor: 'pointer'
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+            minWidth: '210px'
           }}
         >
           <option value="recent">Sort by Recent Activity</option>
@@ -131,21 +168,31 @@ export default function Companies() {
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
               {company.logo_url && (
-                <img
-                  src={company.logo_url}
-                  alt={`${company.name} logo`}
+                <div
                   style={{
                     width: '40px',
                     height: '40px',
-                    objectFit: 'contain',
-                    backgroundColor: '#0f1115',
+                    borderRadius: '4px',
                     padding: '4px',
-                    borderRadius: '4px'
+                    backgroundColor: company.dark_logo_bg ? '#e5e7eb' : '#0f1115',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = 'none';
-                  }}
-                />
+                >
+                  <img
+                    src={company.logo_url}
+                    alt={`${company.name} logo`}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      objectFit: 'contain'
+                    }}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                </div>
               )}
               <h3 style={{ fontSize: '1.25rem', color: '#e5e7eb', margin: 0 }}>
                 {company.name}
@@ -213,6 +260,7 @@ function AddCompanyModal({ onClose, onSave }: { onClose: () => void; onSave: (da
     name: '',
     website: '',
     industry: '',
+    location: '',
     notes: '',
     company_size: ''
   });
@@ -260,6 +308,7 @@ function AddCompanyModal({ onClose, onSave }: { onClose: () => void; onSave: (da
       name: formData.name,
       website: formData.website || null,
       industry: formData.industry || null,
+      location: formData.location.trim() ? formData.location.trim() : null,
       notes: formData.notes || null,
       company_size: formData.company_size || null,
       employee_count: null
@@ -350,6 +399,23 @@ function AddCompanyModal({ onClose, onSave }: { onClose: () => void; onSave: (da
                 </option>
               ))}
             </select>
+          </div>
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>Based out of</label>
+            <input
+              type="text"
+              value={formData.location}
+              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+              placeholder="City, State/Country"
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                backgroundColor: '#0f1115',
+                border: '1px solid #2d3139',
+                borderRadius: '6px',
+                color: '#e5e7eb'
+              }}
+            />
           </div>
           <div style={{ marginBottom: '1rem' }}>
             <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>Company Size</label>

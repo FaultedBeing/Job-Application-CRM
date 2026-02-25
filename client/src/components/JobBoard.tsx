@@ -8,6 +8,8 @@ interface Job {
   title: string;
   company_name: string;
   company_logo_url?: string;
+  company_dark_logo_bg?: boolean;
+  location?: string;
   status: string;
   excitement_score: number;
   fit_score: number;
@@ -171,30 +173,35 @@ export default function JobBoard() {
               e.currentTarget.style.borderColor = '#2d3139';
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '0.5rem' }}>
               {job.company_logo_url && (
-                <img
-                  src={job.company_logo_url}
-                  alt={`${job.company_name} logo`}
-                  style={{
-                    width: '32px',
-                    height: '32px',
-                    objectFit: 'contain',
-                    backgroundColor: '#0f1115',
-                    padding: '4px',
-                    borderRadius: '4px',
-                    flexShrink: 0
-                  }}
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = 'none';
-                  }}
-                />
+                <div style={{ flexShrink: 0, marginTop: '2px' }}>
+                  <img
+                    src={job.company_logo_url}
+                    alt={`${job.company_name} logo`}
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      objectFit: 'contain',
+                      backgroundColor: job.company_dark_logo_bg ? '#e5e7eb' : '#0f1115',
+                      padding: '4px',
+                      borderRadius: '4px',
+                      display: 'block'
+                    }}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                </div>
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', color: '#e5e7eb' }}>
+                <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', color: '#e5e7eb', lineHeight: '1.4' }}>
                   {job.title}
                 </h3>
-                <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{job.company_name}</p>
+                <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>
+                  {job.company_name}
+                  {job.location ? <span style={{ color: '#6b7280' }}> • {job.location}</span> : null}
+                </p>
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -238,6 +245,7 @@ function AddJobModal({ onClose, onSave }: { onClose: () => void; onSave: (data: 
   const [formData, setFormData] = useState({
     company_name: '',
     title: '',
+    location: '',
     status: 'Wishlist',
     link: '',
     description: '',
@@ -310,6 +318,25 @@ function AddJobModal({ onClose, onSave }: { onClose: () => void; onSave: (data: 
               required
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                backgroundColor: '#0f1115',
+                border: '1px solid #2d3139',
+                borderRadius: '6px',
+                color: '#e5e7eb'
+              }}
+            />
+          </div>
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>
+              Location
+            </label>
+            <input
+              type="text"
+              value={formData.location}
+              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+              placeholder="City, State/Country (or Remote)"
               style={{
                 width: '100%',
                 padding: '0.75rem',

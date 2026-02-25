@@ -29,6 +29,19 @@ input, textarea, select {
   font-family: inherit;
 }
 
+/* Dark-themed date/time inputs (follow-up reminder picker) */
+.dark-datetime {
+  background-color: #1a1d24;
+  color: #e5e7eb;
+  border: 1px solid #2d3139;
+  border-radius: 6px;
+}
+
+.dark-datetime::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
+
 /* Custom scrollbar styling to match dark theme */
 ::-webkit-scrollbar {
   width: 8px;

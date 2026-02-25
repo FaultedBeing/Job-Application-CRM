@@ -6,7 +6,9 @@ import JobDetail from './components/JobDetail';
 import Companies from './components/Companies';
 import CompanyDetail from './components/CompanyDetail';
 import Contacts from './components/Contacts';
+import Documents from './components/Documents';
 import Settings from './components/Settings';
+import NotificationSettings from './components/NotificationSettings';
 
 function App() {
   return (
@@ -20,7 +22,9 @@ function App() {
           <Route path="/company/:id" element={<CompanyDetail />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/contacts/:id" element={<Contacts />} />
+          <Route path="/documents" element={<Documents />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/notifications-settings" element={<NotificationSettings />} />
         </Routes>
       </Layout>
     </BrowserRouter>

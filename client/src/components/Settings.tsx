@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
 import { Download, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 export default function Settings() {
   const [username, setUsername] = useState('');
@@ -9,10 +10,22 @@ export default function Settings() {
   const [industries, setIndustries] = useState<string[]>([]);
   const [newIndustry, setNewIndustry] = useState('');
   const [allowPrerelease, setAllowPrerelease] = useState(false);
+   const [showJobMap, setShowJobMap] = useState(true);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   useEffect(() => {
     loadSettings();
   }, []);
+
+  function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
+    setToast({ message, type });
+    // For errors, keep the toast visible until the user closes it.
+    if (type !== 'error') {
+      window.setTimeout(() => {
+        setToast((t) => (t?.message === message ? null : t));
+      }, 2500);
+    }
+  }
 
   async function loadSettings() {
     try {
@@ -20,7 +33,7 @@ export default function Settings() {
       setUsername(res.data.username || 'User');
       const statusStr = res.data.statuses || 'Wishlist,Applied,Interviewing,Offer,Rejected';
       setStatuses(statusStr.split(','));
-      const industryStr = res.data.industries || '';
+      const rawIndustryStr: string | null | undefined = res.data.industries;
       
       // Always reset industries to fix any broken comma-separated entries
       // This ensures proper pipe-delimited format
@@ -42,25 +55,42 @@ export default function Settings() {
         'Other Space-Related'
       ];
       
-      // Check if using old comma format or if industries look broken (too many entries suggests splitting)
-      const hasCommas = industryStr.includes(',') && !industryStr.includes('|');
-      const industryList = hasCommas ? [] : (industryStr.includes('|') ? industryStr.split('|').filter((i: string) => i.trim()) : []);
-      const looksBroken = industryList.length > 20; // If more than 20 entries, likely broken from comma splitting
-      
-      if (industryList.length === 0 || hasCommas || looksBroken || !industryStr.includes('|')) {
-        // Reset to defaults if empty, using old comma format, or looks broken
+      // Seed defaults if settings are missing (first run / older DB)
+      if (rawIndustryStr === undefined || rawIndustryStr === null) {
         setIndustries(defaultIndustries);
         // Save defaults to database with proper pipe delimiter
         await api.post('/settings', {
           industries: defaultIndustries.join('|')
         });
+      } else if (!rawIndustryStr.trim()) {
+        // Respect an intentionally empty list (e.g. user clicked "Clear All")
+        setIndustries([]);
       } else {
-        setIndustries(industryList);
+        const industryStr = rawIndustryStr;
+        // Check if using old comma format or if industries look broken (too many entries suggests splitting)
+        const hasCommas = industryStr.includes(',') && !industryStr.includes('|');
+        const industryList = hasCommas ? [] : (industryStr.includes('|') ? industryStr.split('|').filter((i: string) => i.trim()) : []);
+        const looksBroken = industryList.length > 20; // If more than 20 entries, likely broken from comma splitting
+
+        if (industryList.length === 0 || hasCommas || looksBroken || !industryStr.includes('|')) {
+          // Reset to defaults if using old comma format, looks broken, or missing pipe delimiter
+          setIndustries(defaultIndustries);
+          await api.post('/settings', {
+            industries: defaultIndustries.join('|')
+          });
+        } else {
+          setIndustries(industryList);
+        }
       }
       
       // Load allow_prerelease setting
       const allowPrereleaseStr = res.data.allow_prerelease || 'false';
       setAllowPrerelease(allowPrereleaseStr === 'true');
+
+      // Load job location map toggle (default ON if not set)
+      const showJobMapStr = res.data.show_job_map;
+      setShowJobMap(showJobMapStr === undefined || showJobMapStr === null ? true : showJobMapStr === 'true');
+
     } catch (error) {
       console.error('Error loading settings:', error);
     }
@@ -72,12 +102,23 @@ export default function Settings() {
         username,
         statuses: statuses.join(','),
         industries: industries.join('|'),
-        allow_prerelease: allowPrerelease ? 'true' : 'false'
+        allow_prerelease: allowPrerelease ? 'true' : 'false',
+        show_job_map: showJobMap ? 'true' : 'false'
       });
-      alert('Settings saved!');
+      showToast('Settings saved!', 'success');
     } catch (error) {
       console.error('Error saving settings:', error);
-      alert('Error saving settings');
+      showToast('Error saving settings', 'error');
+    }
+  }
+
+  async function saveIndustries(nextIndustries: string[]) {
+    try {
+      await api.post('/settings', { industries: nextIndustries.join('|') });
+      showToast('Industries saved', 'success');
+    } catch (error) {
+      console.error('Error saving industries:', error);
+      showToast('Error saving industries', 'error');
     }
   }
 
@@ -92,15 +133,20 @@ export default function Settings() {
     setStatuses(statuses.filter(s => s !== status));
   }
 
-  function addIndustry() {
-    if (newIndustry.trim() && !industries.includes(newIndustry.trim())) {
-      setIndustries([...industries, newIndustry.trim()]);
+  async function addIndustry() {
+    const trimmed = newIndustry.trim();
+    if (trimmed && !industries.includes(trimmed)) {
+      const next = [...industries, trimmed];
+      setIndustries(next);
       setNewIndustry('');
+      await saveIndustries(next);
     }
   }
 
-  function removeIndustry(industry: string) {
-    setIndustries(industries.filter(i => i !== industry));
+  async function removeIndustry(industry: string) {
+    const next = industries.filter(i => i !== industry);
+    setIndustries(next);
+    await saveIndustries(next);
   }
 
   async function exportData() {
@@ -116,9 +162,10 @@ export default function Settings() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      showToast('Export started', 'success');
     } catch (error) {
       console.error('Error exporting data:', error);
-      alert('Error exporting data');
+      showToast('Error exporting data', 'error');
     }
   }
 
@@ -131,11 +178,11 @@ export default function Settings() {
     }
     try {
       await api.post('/reset-database');
-      alert('Database reset successfully. Please refresh the page.');
-      window.location.reload();
+      showToast('Database reset. Reloading…', 'success');
+      window.setTimeout(() => window.location.reload(), 800);
     } catch (error) {
       console.error('Error resetting database:', error);
-      alert('Error resetting database');
+      showToast('Error resetting database', 'error');
     }
   }
 
@@ -144,12 +191,13 @@ export default function Settings() {
       const anyWindow = window as any;
       if (anyWindow.electronAPI && typeof anyWindow.electronAPI.checkForUpdates === 'function') {
         anyWindow.electronAPI.checkForUpdates();
+        showToast('Checking for updates…', 'info');
       } else {
-        alert('Update check is only available in the desktop app.');
+        showToast('Update check is only available in the desktop app.', 'info');
       }
     } catch (error) {
       console.error('Error triggering update check from settings:', error);
-      alert('Unable to trigger update check right now.');
+      showToast('Unable to trigger update check right now.', 'error');
     }
   }
 
@@ -247,6 +295,23 @@ export default function Settings() {
         </div>
       </section>
 
+      {/* Job Detail Display */}
+      <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>Job Detail Display</h2>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e5e7eb', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={showJobMap}
+            onChange={(e) => setShowJobMap(e.target.checked)}
+            style={{ accentColor: '#fbbf24', width: 18, height: 18, borderRadius: 4 }}
+          />
+          <span>Show map preview for job locations</span>
+        </label>
+        <p style={{ color: '#9ca3af', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+          When enabled, job detail pages will show a small US map with a pin for the job’s location.
+        </p>
+      </section>
+
       {/* Industry Categories */}
       <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
         <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>Industry Categories</h2>
@@ -286,9 +351,11 @@ export default function Settings() {
           </button>
           {industries.length > 0 && (
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (confirm('Are you sure you want to clear all industry categories?')) {
-                  setIndustries([]);
+                  const next: string[] = [];
+                  setIndustries(next);
+                  await saveIndustries(next);
                 }
               }}
               style={{
@@ -379,7 +446,34 @@ export default function Settings() {
         <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginTop: '0.5rem' }}>
           When enabled, the app will check for pre-release versions (beta, alpha, etc.) in addition to stable releases.
         </p>
-        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>Version v1.1.2</p>
+        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>Version v2.0.0</p>
+      </section>
+
+      {/* Notifications & Email — link to dedicated page */}
+      <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h2 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', color: '#e5e7eb' }}>Notifications &amp; Email</h2>
+            <p style={{ color: '#9ca3af', fontSize: '0.875rem', margin: 0 }}>
+              Configure email reminders (Gmail or custom SMTP/AWS), desktop notification preferences, and summary thresholds.
+            </p>
+          </div>
+          <Link
+            to="/notifications-settings"
+            style={{
+              padding: '0.6rem 1.25rem',
+              backgroundColor: '#3b82f6',
+              border: 'none',
+              borderRadius: '6px',
+              color: '#fff',
+              fontWeight: 'bold',
+              textDecoration: 'none',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            Open
+          </Link>
+        </div>
       </section>
 
       {/* Actions */}
@@ -442,6 +536,59 @@ export default function Settings() {
           </button>
         </div>
       </section>
+
+      {/* Toast */}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            right: '1.25rem',
+            bottom: '1.25rem',
+            zIndex: 2000,
+            padding: '0.75rem 1rem',
+            borderRadius: '10px',
+            border: '1px solid #2d3139',
+            backgroundColor: '#0f1115',
+            color: '#e5e7eb',
+            boxShadow: '0 12px 30px rgba(0,0,0,0.45)',
+            minWidth: '260px',
+            maxWidth: '420px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem'
+          }}
+        >
+          <div
+            style={{
+              width: '10px',
+              height: '10px',
+              borderRadius: 999,
+              backgroundColor:
+                toast.type === 'success' ? '#34d399' : toast.type === 'error' ? '#ef4444' : '#3b82f6',
+              flexShrink: 0
+            }}
+          />
+          <div style={{ fontSize: '0.9rem', lineHeight: 1.2, flex: 1 }}>{toast.message}</div>
+          <button
+            onClick={() => setToast(null)}
+            aria-label="Dismiss notification"
+            style={{
+              padding: '0.25rem 0.4rem',
+              backgroundColor: 'transparent',
+              border: 'none',
+              color: '#9ca3af',
+              cursor: 'pointer',
+              fontSize: '1.1rem',
+              lineHeight: 1
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
     </div>
   );
 }

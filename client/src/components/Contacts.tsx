@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
-import { ArrowLeft, Plus, Edit, Calendar, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, Edit, Calendar, Trash2, Search } from 'lucide-react';
 
 interface Contact {
   id: number;
@@ -11,6 +11,8 @@ interface Contact {
   phone: string;
   linkedin_url?: string;
   company_name: string;
+  company_logo_url?: string;
+  company_dark_logo_bg?: boolean;
   notes?: string;
   next_check_in?: string;
   last_interaction?: string;
@@ -26,6 +28,73 @@ interface Interaction {
   type: string;
   content: string;
   date: string;
+  follow_up_at?: string | null;
+}
+
+type TimezoneOption = { id: string; label: string };
+
+function getDefaultTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+const BASE_TIMEZONES: TimezoneOption[] = [
+  { id: 'America/Los_Angeles', label: 'PT – Los Angeles' },
+  { id: 'America/Denver', label: 'MT – Denver' },
+  { id: 'America/Chicago', label: 'CT – Houston' },
+  { id: 'America/New_York', label: 'ET – New York' },
+  { id: 'Europe/London', label: 'UK – London (GMT/BST)' },
+  { id: 'Europe/Berlin', label: 'EU – Berlin (CET/CEST)' },
+  { id: 'UTC', label: 'UTC' }
+];
+
+const COMMON_TIMEZONES: TimezoneOption[] = (() => {
+  const current = getDefaultTimeZone();
+  if (!current) return BASE_TIMEZONES;
+  if (BASE_TIMEZONES.some((tz) => tz.id === current)) return BASE_TIMEZONES;
+  return [{ id: current, label: `${current} (current)` }, ...BASE_TIMEZONES];
+})();
+
+function toUtcIsoFromLocal(localValue: string, timeZone: string): string | null {
+  if (!localValue) return null;
+  const [datePart, timePart] = localValue.split('T');
+  if (!datePart || !timePart) return null;
+  const [y, m, d] = datePart.split('-').map((n) => parseInt(n, 10));
+  const [hh, mm] = timePart.split(':').map((n) => parseInt(n, 10));
+  if (!y || !m || !d || isNaN(hh) || isNaN(mm)) return null;
+
+  const desiredUtc = Date.UTC(y, m - 1, d, hh, mm);
+  let guess = desiredUtc;
+
+  for (let i = 0; i < 3; i++) {
+    const dt = new Date(guess);
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+    const parts = fmt.formatToParts(dt);
+    const vals: any = {};
+    for (const p of parts) {
+      if (p.type !== 'literal') {
+        vals[p.type] = parseInt(p.value, 10);
+      }
+    }
+    if (!vals.year) break;
+    const actualUtc = Date.UTC(vals.year, (vals.month || 1) - 1, vals.day || 1, vals.hour || 0, vals.minute || 0);
+    const diffMinutes = (actualUtc - desiredUtc) / 60000;
+    if (Math.abs(diffMinutes) < 1) break;
+    guess -= diffMinutes * 60000;
+  }
+
+  return new Date(guess).toISOString();
 }
 
 export default function Contacts() {
@@ -40,6 +109,7 @@ export default function Contacts() {
   const [sortBy, setSortBy] = useState<'recent' | 'name' | 'company' | 'no_company'>('recent');
   const [showAddContact, setShowAddContact] = useState(false);
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     if (id) {
@@ -106,6 +176,22 @@ export default function Contacts() {
     }
   }
 
+  const [confirmInteractionId, setConfirmInteractionId] = useState<number | null>(null);
+
+  async function handleDeleteInteractionConfirmed() {
+    if (confirmInteractionId == null) return;
+    try {
+      await api.delete(`/interactions/${confirmInteractionId}`);
+      setConfirmInteractionId(null);
+      if (id) {
+        loadContactDetail();
+      }
+    } catch (error) {
+      console.error('Error deleting interaction:', error);
+      alert('Error deleting interaction');
+    }
+  }
+
   async function handleSaveNotesInline() {
     if (!selectedContact) return;
     if (notesDraft === (selectedContact.notes || '')) return;
@@ -145,7 +231,7 @@ export default function Contacts() {
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <button
-            onClick={() => navigate('/contacts')}
+            onClick={() => navigate(-1)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -189,7 +275,35 @@ export default function Contacts() {
                   <p style={{ fontSize: '1.25rem', color: '#9ca3af', marginBottom: '0.5rem' }}>{selectedContact.role}</p>
                 )}
                 {selectedContact.company_name && (
-                  <p style={{ color: '#9ca3af', marginBottom: '1rem' }}>{selectedContact.company_name}</p>
+                  <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div>
+                      <p style={{ color: '#9ca3af', marginBottom: '0.25rem' }}>{selectedContact.company_name}</p>
+                      {selectedContact.company_logo_url && (
+                        <div
+                          style={{
+                            width: '40px',
+                            height: '40px',
+                            borderRadius: '6px',
+                            padding: '4px',
+                            backgroundColor: selectedContact.company_dark_logo_bg ? '#e5e7eb' : '#0f1115',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '1px solid #2d3139'
+                          }}
+                        >
+                          <img
+                            src={selectedContact.company_logo_url}
+                            alt={`${selectedContact.company_name} logo`}
+                            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
               <button
@@ -292,16 +406,45 @@ export default function Contacts() {
                             marginBottom: '0.5rem',
                             backgroundColor: '#0f1115',
                             borderRadius: '6px',
-                            borderLeft: '3px solid #fbbf24'
+                            borderLeft: '3px solid #fbbf24',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: '0.75rem'
                           }}
                         >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                            <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>{interaction.type}</span>
-                            <span style={{ color: '#9ca3af', fontSize: '0.875rem' }}>
-                              {new Date(interaction.date).toLocaleDateString()}
-                            </span>
+                          <div style={{ flex: 1 }}>
+                            <div
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                marginBottom: '0.35rem',
+                                gap: '0.75rem'
+                              }}
+                            >
+                              <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>{interaction.type}</span>
+                              <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#9ca3af' }}>
+                                <div>Action: {new Date(interaction.date).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</div>
+                                {interaction.follow_up_at && (
+                                  <div style={{ color: '#fbbf24' }}>Reminder: {new Date(interaction.follow_up_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</div>
+                                )}
+                              </div>
+                            </div>
+                            <p style={{ color: '#e5e7eb' }}>{interaction.content}</p>
                           </div>
-                          <p style={{ color: '#e5e7eb' }}>{interaction.content}</p>
+                          <button
+                            onClick={() => setConfirmInteractionId(interaction.id)}
+                            title="Delete activity"
+                            style={{
+                              alignSelf: 'flex-start',
+                              padding: '0.25rem',
+                              backgroundColor: 'transparent',
+                              border: 'none',
+                              color: '#4b5563',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -345,6 +488,73 @@ export default function Contacts() {
             onSave={handleAddInteraction}
           />
         )}
+
+        {/* Delete activity confirmation */}
+        {confirmInteractionId !== null && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.6)',
+              zIndex: 2000,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            onClick={() => setConfirmInteractionId(null)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                backgroundColor: '#1a1d24',
+                borderRadius: '12px',
+                padding: '1.5rem',
+                width: '90%',
+                maxWidth: '420px',
+                border: '1px solid #2d3139',
+                boxShadow: '0 20px 45px rgba(0,0,0,0.6)'
+              }}
+            >
+              <h2 style={{ fontSize: '1.1rem', color: '#fbbf24', marginBottom: '0.75rem' }}>Delete activity</h2>
+              <p style={{ color: '#e5e7eb', fontSize: '0.95rem', marginBottom: '1.25rem' }}>
+                This will remove this activity entry from the log. This will not delete any related contact or company.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setConfirmInteractionId(null)}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    backgroundColor: 'transparent',
+                    border: '1px solid #2d3139',
+                    borderRadius: '6px',
+                    color: '#e5e7eb',
+                    cursor: 'pointer',
+                    fontSize: '0.9rem'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteInteractionConfirmed}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    backgroundColor: '#ef4444',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: '0.9rem',
+                    fontWeight: 600
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -370,29 +580,59 @@ export default function Contacts() {
         </button>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.5rem' }}>
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as any)}
-          style={{
-            padding: '0.5rem 1rem',
-            backgroundColor: '#1a1d24',
-            border: '1px solid #2d3139',
-            borderRadius: '6px',
-            color: '#e5e7eb',
-            fontSize: '0.9rem',
-            cursor: 'pointer'
-          }}
-        >
-          <option value="recent">Sort by Recent Activity</option>
-          <option value="name">Sort by Name (A–Z)</option>
-          <option value="company">Sort by Company (A–Z)</option>
-          <option value="no_company">No Company First</option>
-        </select>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', gap: '1rem' }}>
+        <div style={{ position: 'relative', flex: 1 }}>
+          <Search size={20} style={{ position: 'absolute', left: '12px', top: '10px', color: '#9ca3af' }} />
+          <input
+            type="text"
+            placeholder="Search contacts by name, role, or company..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '0.6rem 1rem 0.6rem 2.5rem',
+              backgroundColor: '#1a1d24',
+              border: '1px solid #2d3139',
+              borderRadius: '6px',
+              color: '#e5e7eb',
+              fontSize: '0.95rem'
+            }}
+          />
+        </div>
+        <div>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            style={{
+              padding: '0.6rem 1rem',
+              backgroundColor: '#1a1d24',
+              border: '1px solid #2d3139',
+              borderRadius: '6px',
+              color: '#e5e7eb',
+              fontSize: '0.95rem',
+              cursor: 'pointer',
+              minWidth: '220px'
+            }}
+          >
+            <option value="recent">Sort by Recent Activity</option>
+            <option value="name">Sort by Name (A–Z)</option>
+            <option value="company">Sort by Company (A–Z)</option>
+            <option value="no_company">No Company First</option>
+          </select>
+        </div>
       </div>
 
       {(() => {
-        const sortedContacts = [...contacts].sort((a, b) => {
+        const q = searchTerm.trim().toLowerCase();
+        const filtered = q
+          ? contacts.filter((c) =>
+              c.name.toLowerCase().includes(q) ||
+              (c.role || '').toLowerCase().includes(q) ||
+              (c.company_name || '').toLowerCase().includes(q)
+            )
+          : contacts;
+
+        const sortedContacts = [...filtered].sort((a, b) => {
           if (sortBy === 'name') {
             return a.name.localeCompare(b.name);
           }
@@ -450,9 +690,36 @@ export default function Contacts() {
                 <p style={{ color: '#9ca3af', marginBottom: '0.5rem' }}>{contact.role}</p>
               )}
               {contact.company_name && (
-                <p style={{ color: '#9ca3af', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
-                  {contact.company_name}
-                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                  {contact.company_logo_url && (
+                    <div
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '4px',
+                        padding: '2px',
+                        backgroundColor: contact.company_dark_logo_bg ? '#e5e7eb' : '#0f1115',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '1px solid #2d3139',
+                        flexShrink: 0
+                      }}
+                    >
+                      <img
+                        src={contact.company_logo_url}
+                        alt={`${contact.company_name} logo`}
+                        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  )}
+                  <p style={{ color: '#9ca3af', fontSize: '0.875rem', margin: 0 }}>
+                    {contact.company_name}
+                  </p>
+                </div>
               )}
               {contact.email && (
                 <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
@@ -606,10 +873,28 @@ function EditContactForm({ contact, onSave, onCancel }: { contact: Contact; onSa
 
 function AddInteractionModal({ contactId: _contactId, onClose, onSave }: { contactId: number; onClose: () => void; onSave: (data: any) => void }) {
   const [formData, setFormData] = useState({ type: 'Email', content: '' });
+  const [enableFollowUp, setEnableFollowUp] = useState(false);
+  const [followUpAt, setFollowUpAt] = useState('');
+  const [followUpMessage, setFollowUpMessage] = useState('');
+  const [notifyDesktop, setNotifyDesktop] = useState(true);
+  const [notifyEmail, setNotifyEmail] = useState(false);
+  const [followUpTimeZone, setFollowUpTimeZone] = useState<string>(getDefaultTimeZone());
+  const [interactionDate, setInteractionDate] = useState<string>(() => new Date().toISOString().slice(0, 16));
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    onSave(formData);
+    const dueIso =
+      enableFollowUp && followUpAt
+        ? toUtcIsoFromLocal(followUpAt, followUpTimeZone) || new Date(followUpAt).toISOString()
+        : null;
+    onSave({
+      ...formData,
+      follow_up_at: dueIso,
+      follow_up_message: enableFollowUp ? followUpMessage : null,
+      notify_desktop: enableFollowUp ? notifyDesktop : null,
+      notify_email: enableFollowUp ? notifyEmail : null,
+      date: interactionDate ? new Date(interactionDate).toISOString() : undefined
+    });
   }
 
   return (
@@ -623,7 +908,77 @@ function AddInteractionModal({ contactId: _contactId, onClose, onSave }: { conta
             <option value="Meeting">Meeting</option>
             <option value="Note">Note</option>
           </select>
+          <div style={{ marginBottom: '0.75rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.25rem', color: '#e5e7eb', fontSize: '0.85rem' }}>When did this happen?</label>
+            <input
+              type="datetime-local"
+              value={interactionDate}
+              onChange={(e) => setInteractionDate(e.target.value)}
+              className="dark-datetime"
+              style={{ width: '100%', padding: '0.5rem' }}
+            />
+          </div>
           <textarea placeholder="Content" required value={formData.content} onChange={(e) => setFormData({ ...formData, content: e.target.value })} style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', minHeight: '100px' }} />
+          <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e5e7eb', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={enableFollowUp}
+                onChange={(e) => setEnableFollowUp(e.target.checked)}
+                style={{ accentColor: '#fbbf24', width: 18, height: 18, borderRadius: 4 }}
+              />
+              Add follow-up reminder
+            </label>
+            {enableFollowUp && (
+              <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={notifyDesktop} onChange={(e) => setNotifyDesktop(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
+                    Desktop notification
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={notifyEmail} onChange={(e) => setNotifyEmail(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
+                    Email me (requires email setup in Settings)
+                  </label>
+                </div>
+                <input
+                  type="datetime-local"
+                  value={followUpAt}
+                  onChange={(e) => setFollowUpAt(e.target.value)}
+                  className="dark-datetime"
+                  style={{ width: '100%', padding: '0.75rem' }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', fontSize: '0.8rem' }}>
+                  <span>Time zone:</span>
+                  <select
+                    value={followUpTimeZone}
+                    onChange={(e) => setFollowUpTimeZone(e.target.value)}
+                    style={{
+                      padding: '0.25rem 0.5rem',
+                      backgroundColor: '#0f1115',
+                      border: '1px solid #2d3139',
+                      borderRadius: '4px',
+                      color: '#e5e7eb',
+                      fontSize: '0.8rem'
+                    }}
+                  >
+                    {COMMON_TIMEZONES.map((tz) => (
+                      <option key={tz.id} value={tz.id}>
+                        {tz.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <input
+                  type="text"
+                  value={followUpMessage}
+                  onChange={(e) => setFollowUpMessage(e.target.value)}
+                  placeholder="Optional reminder note"
+                  style={{ width: '100%', padding: '0.75rem', backgroundColor: '#1a1d24', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
+                />
+              </div>
+            )}
+          </div>
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
             <button type="button" onClick={onClose} style={{ padding: '0.75rem 1.5rem', backgroundColor: 'transparent', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', cursor: 'pointer' }}>Cancel</button>
             <button type="submit" style={{ padding: '0.75rem 1.5rem', backgroundColor: '#fbbf24', border: 'none', borderRadius: '6px', color: '#0f1115', fontWeight: 'bold', cursor: 'pointer' }}>Add</button>

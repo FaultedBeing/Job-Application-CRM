@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api';
-import { ArrowLeft, Edit, Plus, Upload, Trash2 } from 'lucide-react';
+import { ArrowLeft, Edit, Plus, Upload, Trash2, ExternalLink, Pencil, Check, X } from 'lucide-react';
+import USMap from './USMap';
 
 interface Job {
   id: number;
@@ -10,7 +11,9 @@ interface Job {
   company_id?: number;
   company?: {
     logo_url?: string;
+    dark_logo_bg?: boolean;
   };
+  location?: string;
   status: string;
   link: string;
   description: string;
@@ -36,11 +39,79 @@ interface Interaction {
   content: string;
   date: string;
   contact_name?: string;
+  follow_up_at?: string | null;
+}
+
+type TimezoneOption = { id: string; label: string };
+
+function getDefaultTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+const BASE_TIMEZONES: TimezoneOption[] = [
+  { id: 'America/Los_Angeles', label: 'PT – Los Angeles' },
+  { id: 'America/Denver', label: 'MT – Denver' },
+  { id: 'America/Chicago', label: 'CT – Houston' },
+  { id: 'America/New_York', label: 'ET – New York' },
+  { id: 'Europe/London', label: 'UK – London (GMT/BST)' },
+  { id: 'Europe/Berlin', label: 'EU – Berlin (CET/CEST)' },
+  { id: 'UTC', label: 'UTC' }
+];
+
+const COMMON_TIMEZONES: TimezoneOption[] = (() => {
+  const current = getDefaultTimeZone();
+  if (!current) return BASE_TIMEZONES;
+  if (BASE_TIMEZONES.some((tz) => tz.id === current)) return BASE_TIMEZONES;
+  return [{ id: current, label: `${current} (current)` }, ...BASE_TIMEZONES];
+})();
+
+function toUtcIsoFromLocal(localValue: string, timeZone: string): string | null {
+  if (!localValue) return null;
+  const [datePart, timePart] = localValue.split('T');
+  if (!datePart || !timePart) return null;
+  const [y, m, d] = datePart.split('-').map((n) => parseInt(n, 10));
+  const [hh, mm] = timePart.split(':').map((n) => parseInt(n, 10));
+  if (!y || !m || !d || isNaN(hh) || isNaN(mm)) return null;
+
+  const desiredUtc = Date.UTC(y, m - 1, d, hh, mm);
+  let guess = desiredUtc;
+
+  for (let i = 0; i < 3; i++) {
+    const dt = new Date(guess);
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+    const parts = fmt.formatToParts(dt);
+    const vals: any = {};
+    for (const p of parts) {
+      if (p.type !== 'literal') {
+        vals[p.type] = parseInt(p.value, 10);
+      }
+    }
+    if (!vals.year) break;
+    const actualUtc = Date.UTC(vals.year, (vals.month || 1) - 1, vals.day || 1, vals.hour || 0, vals.minute || 0);
+    const diffMinutes = (actualUtc - desiredUtc) / 60000;
+    if (Math.abs(diffMinutes) < 1) break;
+    guess -= diffMinutes * 60000;
+  }
+
+  return new Date(guess).toISOString();
 }
 
 interface Document {
   id: number;
   filename: string;
+  path: string;
   type: string;
   created_at: string;
 }
@@ -57,6 +128,10 @@ export default function JobDetail() {
   const [showAddContact, setShowAddContact] = useState(false);
   const [showAddInteraction, setShowAddInteraction] = useState(false);
   const [jobNotes, setJobNotes] = useState('');
+  const [editingDocId, setEditingDocId] = useState<number | null>(null);
+  const [editDocName, setEditDocName] = useState('');
+  const [editDocType, setEditDocType] = useState('');
+  const [showJobMap, setShowJobMap] = useState(true);
 
   useEffect(() => {
     if (id) {
@@ -91,8 +166,11 @@ export default function JobDetail() {
       const res = await api.get('/settings');
       const statusStr = res.data.statuses || 'Wishlist,Applied,Interviewing,Offer,Rejected';
       setStatuses(statusStr.split(','));
+      const showJobMapStr = res.data.show_job_map;
+      setShowJobMap(showJobMapStr === undefined || showJobMapStr === null ? true : showJobMapStr === 'true');
     } catch (error) {
       setStatuses(['Wishlist', 'Applied', 'Interviewing', 'Offer', 'Rejected']);
+      setShowJobMap(true);
     }
   }
 
@@ -137,17 +215,32 @@ export default function JobDetail() {
     }
   }
 
+  const [confirmInteractionId, setConfirmInteractionId] = useState<number | null>(null);
+
+  async function handleDeleteInteractionConfirmed() {
+    if (confirmInteractionId == null) return;
+    try {
+      await api.delete(`/interactions/${confirmInteractionId}`);
+      setConfirmInteractionId(null);
+      loadData();
+    } catch (error) {
+      console.error('Error deleting interaction:', error);
+      alert('Error deleting interaction');
+    }
+  }
+
   async function handleUploadDocument(file: File, type: string) {
     try {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('type', type);
-      await api.post(`/jobs/${id}/documents`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      await api.post(`/jobs/${id}/documents`, formData);
       loadData();
     } catch (error) {
       console.error('Error uploading document:', error);
+      const anyErr = error as any;
+      const serverMessage = anyErr?.response?.data?.error || anyErr?.message || 'Unknown error';
+      alert(`There was a problem uploading that file:\n\n${serverMessage}`);
     }
   }
 
@@ -158,6 +251,29 @@ export default function JobDetail() {
       loadData();
     } catch (error) {
       console.error('Error deleting document:', error);
+    }
+  }
+
+  function startEditingDoc(doc: Document) {
+    setEditingDocId(doc.id);
+    setEditDocName(doc.filename);
+    setEditDocType(doc.type);
+  }
+
+  function cancelEditingDoc() {
+    setEditingDocId(null);
+    setEditDocName('');
+    setEditDocType('');
+  }
+
+  async function handleSaveDocEdit(docId: number) {
+    if (!editDocName.trim()) return;
+    try {
+      await api.put(`/documents/${docId}`, { filename: editDocName.trim(), type: editDocType });
+      setEditingDocId(null);
+      loadData();
+    } catch (error) {
+      console.error('Error renaming document:', error);
     }
   }
 
@@ -228,8 +344,8 @@ export default function JobDetail() {
 
       {!editing ? (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '2rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem', gap: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', minWidth: 0 }}>
               {job.company?.logo_url && (
                 <img
                   src={job.company.logo_url}
@@ -238,7 +354,7 @@ export default function JobDetail() {
                     width: '50px',
                     height: '50px',
                     objectFit: 'contain',
-                    backgroundColor: '#0f1115',
+                    backgroundColor: job.company.dark_logo_bg ? '#e5e7eb' : '#0f1115',
                     padding: '6px',
                     borderRadius: '6px'
                   }}
@@ -247,48 +363,71 @@ export default function JobDetail() {
                   }}
                 />
               )}
-              <div>
-                <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', color: '#fbbf24' }}>{job.title}</h1>
-                <p style={{ fontSize: '1.25rem', color: '#9ca3af' }}>{job.company_name}</p>
+              <div style={{ minWidth: 0 }}>
+                <h1 style={{ fontSize: '2rem', marginBottom: '0.35rem', color: '#fbbf24' }}>{job.title}</h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontSize: '1.1rem', color: '#9ca3af', margin: 0 }}>{job.company_name}</p>
+                    {job.location && (
+                      <p style={{ fontSize: '0.9rem', color: '#6b7280', marginTop: '0.1rem', marginBottom: 0 }}>{job.location}</p>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      padding: '0.35rem 0.8rem',
+                      borderRadius: '999px',
+                      backgroundColor: '#111827',
+                      border: '1px solid #1f2937',
+                      fontSize: '0.9rem',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    <span style={{ color: '#fbbf24' }}>★ Excitement: {job.excitement_score}</span>
+                    <span style={{ color: '#34d399' }}>● Fit: {job.fit_score}</span>
+                  </div>
+                </div>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button
-                onClick={() => setEditing(true)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '0.75rem 1.5rem',
-                  backgroundColor: '#1a1d24',
-                  border: '1px solid #2d3139',
-                  borderRadius: '6px',
-                  color: '#e5e7eb',
-                  cursor: 'pointer'
-                }}
-              >
-                <Edit size={20} />
-                Edit
-              </button>
-              <button
-                onClick={handleDeleteJob}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '0.75rem 1.5rem',
-                  backgroundColor: 'transparent',
-                  border: '1px solid #4b5563',
-                  borderRadius: '6px',
-                  color: '#f87171',
-                  cursor: 'pointer'
-                }}
-              >
-                <Trash2 size={18} />
-                Delete
-              </button>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+                <button
+                  onClick={() => setEditing(true)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.75rem 1.5rem',
+                    backgroundColor: '#1a1d24',
+                    border: '1px solid #2d3139',
+                    borderRadius: '6px',
+                    color: '#e5e7eb',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Edit size={20} />
+                  Edit
+                </button>
+                <button
+                  onClick={handleDeleteJob}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.75rem 1.5rem',
+                    backgroundColor: 'transparent',
+                    border: '1px solid #4b5563',
+                    borderRadius: '6px',
+                    color: '#f87171',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Trash2 size={18} />
+                  Delete
+                </button>
+              </div>
             </div>
-          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem' }}>
             <div>
@@ -313,17 +452,50 @@ export default function JobDetail() {
                   </select>
                 </div>
                 <div style={{ marginBottom: '1rem' }}>
-                  <label style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Scores</label>
-                  <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-                    <span style={{ color: '#fbbf24' }}>★ Excitement: {job.excitement_score}</span>
-                    <span style={{ color: '#34d399' }}>● Fit: {job.fit_score}</span>
+                  <label style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Location</label>
+                  <div style={{ color: job.location ? '#e5e7eb' : '#6b7280', marginTop: '0.5rem' }}>
+                    {job.location || '—'}
                   </div>
+                  {job.location && showJobMap && <USMap location={job.location} height={220} />}
                 </div>
                 {job.link && (
                   <div style={{ marginBottom: '1rem' }}>
-                    <a href={job.link} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>
+                    <button
+                      onClick={() => {
+                        if ((window as any).electronAPI?.openExternal) {
+                          (window as any).electronAPI.openExternal(job.link);
+                        } else {
+                          window.open(job.link, '_blank');
+                        }
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.6rem 1.2rem',
+                        backgroundColor: '#1a1d24',
+                        border: '1px solid #2d3139',
+                        borderRadius: '6px',
+                        color: '#fbbf24',
+                        fontSize: '0.95rem',
+                        fontWeight: '500',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        textDecoration: 'none'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#2d3139';
+                        e.currentTarget.style.borderColor = '#fbbf24';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#1a1d24';
+                        e.currentTarget.style.borderColor = '#2d3139';
+                      }}
+                      title="Open job posting in browser"
+                    >
+                      <ExternalLink size={16} />
                       View Job Posting
-                    </a>
+                    </button>
                   </div>
                 )}
                 {job.description && (
@@ -389,21 +561,52 @@ export default function JobDetail() {
                           marginBottom: '0.5rem',
                           backgroundColor: '#0f1115',
                           borderRadius: '6px',
-                          borderLeft: '3px solid #fbbf24'
+                          borderLeft: '3px solid #fbbf24',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: '0.75rem'
                         }}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                        <div style={{ flex: 1 }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            marginBottom: '0.35rem',
+                            gap: '0.75rem'
+                          }}
+                        >
                           <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>{interaction.type}</span>
-                          <span style={{ color: '#9ca3af', fontSize: '0.875rem' }}>
-                            {new Date(interaction.date).toLocaleDateString()}
-                          </span>
+                          <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#9ca3af' }}>
+                            <div>Action: {new Date(interaction.date).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</div>
+                            {interaction.follow_up_at && (
+                              <div style={{ color: '#fbbf24' }}>
+                                Reminder: {new Date(interaction.follow_up_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        {interaction.contact_name && (
-                          <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
-                            With: {interaction.contact_name}
-                          </p>
-                        )}
-                        <p style={{ color: '#e5e7eb' }}>{interaction.content}</p>
+                          {interaction.contact_name && (
+                            <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
+                              With: {interaction.contact_name}
+                            </p>
+                          )}
+                          <p style={{ color: '#e5e7eb' }}>{interaction.content}</p>
+                        </div>
+                        <button
+                          onClick={() => setConfirmInteractionId(interaction.id)}
+                          title="Delete activity"
+                          style={{
+                            alignSelf: 'flex-start',
+                            padding: '0.25rem',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            color: '#4b5563',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -452,7 +655,14 @@ export default function JobDetail() {
                         }}
                       >
                         <div>
-                          <p style={{ color: '#e5e7eb', fontWeight: 'bold' }}>{contact.name}</p>
+                          <p style={{ fontWeight: 'bold' }}>
+                            <Link
+                              to={`/contacts/${contact.id}`}
+                              style={{ color: '#e5e7eb', textDecoration: 'none' }}
+                            >
+                              {contact.name}
+                            </Link>
+                          </p>
                           {contact.role && <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{contact.role}</p>}
                           {contact.email && (
                             <a href={`mailto:${contact.email}`} style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}>
@@ -514,28 +724,66 @@ export default function JobDetail() {
                           borderRadius: '6px'
                         }}
                       >
-                        <div>
-                          <a
-                            href={`/uploads/${doc.filename}`}
-                            target="_blank"
-                            style={{ color: '#3b82f6', textDecoration: 'none' }}
-                          >
-                            {doc.filename}
-                          </a>
-                          <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{doc.type}</p>
-                        </div>
-                        <button
-                          onClick={() => handleDeleteDocument(doc.id)}
-                          style={{
-                            padding: '0.25rem',
-                            backgroundColor: 'transparent',
-                            border: 'none',
-                            color: '#ef4444',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        {editingDocId === doc.id ? (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
+                              <input
+                                type="text"
+                                value={editDocName}
+                                onChange={(e) => setEditDocName(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveDocEdit(doc.id); if (e.key === 'Escape') cancelEditingDoc(); }}
+                                autoFocus
+                                style={{
+                                  flex: 1,
+                                  padding: '4px 8px',
+                                  backgroundColor: '#1a1d24',
+                                  border: '1px solid #fbbf24',
+                                  borderRadius: '4px',
+                                  color: '#e5e7eb',
+                                  fontSize: '0.875rem'
+                                }}
+                              />
+                              <select
+                                value={editDocType}
+                                onChange={(e) => setEditDocType(e.target.value)}
+                                style={{
+                                  padding: '4px 8px',
+                                  backgroundColor: '#1a1d24',
+                                  border: '1px solid #2d3139',
+                                  borderRadius: '4px',
+                                  color: '#e5e7eb',
+                                  fontSize: '0.75rem'
+                                }}
+                              >
+                                <option value="Resume">Resume</option>
+                                <option value="Cover Letter">Cover Letter</option>
+                                <option value="Portfolio">Portfolio</option>
+                                <option value="Other">Other</option>
+                              </select>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.25rem', marginLeft: '0.5rem', flexShrink: 0 }}>
+                              <button onClick={() => handleSaveDocEdit(doc.id)} title="Save" style={{ padding: '0.25rem', backgroundColor: 'transparent', border: 'none', color: '#34d399', cursor: 'pointer' }}><Check size={16} /></button>
+                              <button onClick={cancelEditingDoc} title="Cancel" style={{ padding: '0.25rem', backgroundColor: 'transparent', border: 'none', color: '#9ca3af', cursor: 'pointer' }}><X size={16} /></button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div>
+                              <a
+                                href={`/uploads/${doc.path ? doc.path.split(/[\\/]/).pop() : doc.filename}`}
+                                target="_blank"
+                                style={{ color: '#3b82f6', textDecoration: 'none' }}
+                              >
+                                {doc.filename}
+                              </a>
+                              <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{doc.type}</p>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
+                              <button onClick={() => startEditingDoc(doc)} title="Rename" style={{ padding: '0.25rem', backgroundColor: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer' }}><Pencil size={14} /></button>
+                              <button onClick={() => handleDeleteDocument(doc.id)} style={{ padding: '0.25rem', backgroundColor: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer' }}><Trash2 size={16} /></button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -563,6 +811,73 @@ export default function JobDetail() {
           onClose={() => setShowAddInteraction(false)}
           onSave={handleAddInteraction}
         />
+      )}
+      {/* Delete activity confirmation */}
+      {confirmInteractionId !== null && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          onClick={() => setConfirmInteractionId(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#1a1d24',
+              borderRadius: '12px',
+              padding: '1.5rem',
+              width: '90%',
+              maxWidth: '420px',
+              border: '1px solid #2d3139',
+              boxShadow: '0 20px 45px rgba(0,0,0,0.6)'
+            }}
+          >
+            <h2 style={{ fontSize: '1.1rem', color: '#fbbf24', marginBottom: '0.75rem' }}>Delete activity</h2>
+            <p style={{ color: '#e5e7eb', fontSize: '0.95rem', marginBottom: '1.25rem' }}>
+              This will remove this activity entry from the log. This will not delete any related job, company, or
+              contact.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => setConfirmInteractionId(null)}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #2d3139',
+                  borderRadius: '6px',
+                  color: '#e5e7eb',
+                  cursor: 'pointer',
+                  fontSize: '0.9rem'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteInteractionConfirmed}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#ef4444',
+                  border: 'none',
+                  borderRadius: '6px',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: '0.9rem',
+                  fontWeight: 600
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -610,6 +925,16 @@ function EditJobForm({ job, onSave, onCancel }: { job: Job; onSave: (job: Job) =
           required
           value={formData.title}
           onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+          style={{ width: '100%', padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
+        />
+      </div>
+      <div style={{ marginBottom: '1rem' }}>
+        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>Location</label>
+        <input
+          type="text"
+          value={formData.location || ''}
+          onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+          placeholder="City, State/Country (or Remote)"
           style={{ width: '100%', padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
         />
       </div>
@@ -686,14 +1011,23 @@ function EditJobForm({ job, onSave, onCancel }: { job: Job; onSave: (job: Job) =
 
 function DocumentUpload({ onUpload }: { onUpload: (file: File, type: string) => void }) {
   const [showModal, setShowModal] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [docType, setDocType] = useState('Other');
 
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) {
-      const type = prompt('Document type (Resume, Cover Letter, Other):') || 'Other';
-      onUpload(file, type);
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (selectedFile) {
+      onUpload(selectedFile, docType);
       setShowModal(false);
+      setSelectedFile(null);
+      setDocType('Other');
     }
+  }
+
+  function handleClose() {
+    setShowModal(false);
+    setSelectedFile(null);
+    setDocType('Other');
   }
 
   return (
@@ -716,9 +1050,109 @@ function DocumentUpload({ onUpload }: { onUpload: (file: File, type: string) => 
         Upload
       </button>
       {showModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowModal(false)}>
-          <div style={{ backgroundColor: '#1a1d24', padding: '2rem', borderRadius: '8px' }} onClick={(e) => e.stopPropagation()}>
-            <input type="file" onChange={handleFileSelect} style={{ color: '#e5e7eb' }} />
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}
+          onClick={handleClose}
+        >
+          <div
+            style={{
+              backgroundColor: '#1a1d24',
+              padding: '2rem',
+              borderRadius: '8px',
+              width: '90%',
+              maxWidth: '460px',
+              border: '1px solid #2d3139'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#fbbf24' }}>Attach Document</h3>
+            <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
+              Upload a document specific to this job (resume, cover letter, etc.).
+            </p>
+            <form onSubmit={handleSubmit}>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>
+                  Document Type
+                </label>
+                <select
+                  value={docType}
+                  onChange={(e) => setDocType(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    backgroundColor: '#0f1115',
+                    border: '1px solid #2d3139',
+                    borderRadius: '6px',
+                    color: '#e5e7eb'
+                  }}
+                >
+                  <option value="Resume">Resume</option>
+                  <option value="Cover Letter">Cover Letter</option>
+                  <option value="Portfolio">Portfolio</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>
+                  File
+                </label>
+                <input
+                  type="file"
+                  required
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    backgroundColor: '#0f1115',
+                    border: '1px solid #2d3139',
+                    borderRadius: '6px',
+                    color: '#e5e7eb'
+                  }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    backgroundColor: 'transparent',
+                    border: '1px solid #2d3139',
+                    borderRadius: '6px',
+                    color: '#e5e7eb',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!selectedFile}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    backgroundColor: selectedFile ? '#fbbf24' : '#4b5563',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#0f1115',
+                    fontWeight: 'bold',
+                    cursor: selectedFile ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  Upload
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -757,10 +1191,29 @@ function AddContactModal({ jobId, onClose, onSave }: { jobId: number; onClose: (
 
 function AddInteractionModal({ jobId: _jobId, contacts, onClose, onSave }: { jobId: number; contacts: Contact[]; onClose: () => void; onSave: (data: any) => void }) {
   const [formData, setFormData] = useState({ type: 'Email', content: '', contact_id: '' });
+  const [enableFollowUp, setEnableFollowUp] = useState(false);
+  const [followUpAt, setFollowUpAt] = useState('');
+  const [followUpMessage, setFollowUpMessage] = useState('');
+  const [notifyDesktop, setNotifyDesktop] = useState(true);
+  const [notifyEmail, setNotifyEmail] = useState(false);
+  const [followUpTimeZone, setFollowUpTimeZone] = useState<string>(getDefaultTimeZone());
+  const [interactionDate, setInteractionDate] = useState<string>(() => new Date().toISOString().slice(0, 16));
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    onSave({ ...formData, contact_id: formData.contact_id ? parseInt(formData.contact_id) : null });
+    const dueIso =
+      enableFollowUp && followUpAt
+        ? toUtcIsoFromLocal(followUpAt, followUpTimeZone) || new Date(followUpAt).toISOString()
+        : null;
+    onSave({
+      ...formData,
+      contact_id: formData.contact_id ? parseInt(formData.contact_id) : null,
+      follow_up_at: dueIso,
+      follow_up_message: enableFollowUp ? followUpMessage : null,
+      notify_desktop: enableFollowUp ? notifyDesktop : null,
+      notify_email: enableFollowUp ? notifyEmail : null,
+      date: interactionDate ? new Date(interactionDate).toISOString() : undefined
+    });
   }
 
   return (
@@ -774,11 +1227,81 @@ function AddInteractionModal({ jobId: _jobId, contacts, onClose, onSave }: { job
             <option value="Interview">Interview</option>
             <option value="Note">Note</option>
           </select>
+          <div style={{ marginBottom: '0.75rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.25rem', color: '#e5e7eb', fontSize: '0.85rem' }}>When did this happen?</label>
+            <input
+              type="datetime-local"
+              value={interactionDate}
+              onChange={(e) => setInteractionDate(e.target.value)}
+              className="dark-datetime"
+              style={{ width: '100%', padding: '0.5rem' }}
+            />
+          </div>
           <select value={formData.contact_id} onChange={(e) => setFormData({ ...formData, contact_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}>
             <option value="">No contact</option>
             {contacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <textarea placeholder="Content" required value={formData.content} onChange={(e) => setFormData({ ...formData, content: e.target.value })} style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', minHeight: '100px' }} />
+          <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e5e7eb', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={enableFollowUp}
+                onChange={(e) => setEnableFollowUp(e.target.checked)}
+                style={{ accentColor: '#fbbf24', width: 18, height: 18, borderRadius: 4 }}
+              />
+              Add follow-up reminder
+            </label>
+            {enableFollowUp && (
+              <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={notifyDesktop} onChange={(e) => setNotifyDesktop(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
+                    Desktop notification
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={notifyEmail} onChange={(e) => setNotifyEmail(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
+                    Email me (requires email setup in Settings)
+                  </label>
+                </div>
+                <input
+                  type="datetime-local"
+                  value={followUpAt}
+                  onChange={(e) => setFollowUpAt(e.target.value)}
+                  className="dark-datetime"
+                  style={{ width: '100%', padding: '0.75rem' }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', fontSize: '0.8rem' }}>
+                  <span>Time zone:</span>
+                  <select
+                    value={followUpTimeZone}
+                    onChange={(e) => setFollowUpTimeZone(e.target.value)}
+                    style={{
+                      padding: '0.25rem 0.5rem',
+                      backgroundColor: '#0f1115',
+                      border: '1px solid #2d3139',
+                      borderRadius: '4px',
+                      color: '#e5e7eb',
+                      fontSize: '0.8rem'
+                    }}
+                  >
+                    {COMMON_TIMEZONES.map((tz) => (
+                      <option key={tz.id} value={tz.id}>
+                        {tz.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <input
+                  type="text"
+                  value={followUpMessage}
+                  onChange={(e) => setFollowUpMessage(e.target.value)}
+                  placeholder="Optional reminder note"
+                  style={{ width: '100%', padding: '0.75rem', backgroundColor: '#1a1d24', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
+                />
+              </div>
+            )}
+          </div>
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
             <button type="button" onClick={onClose} style={{ padding: '0.75rem 1.5rem', backgroundColor: 'transparent', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', cursor: 'pointer' }}>Cancel</button>
             <button type="submit" style={{ padding: '0.75rem 1.5rem', backgroundColor: '#fbbf24', border: 'none', borderRadius: '6px', color: '#0f1115', fontWeight: 'bold', cursor: 'pointer' }}>Add</button>

@@ -1,17 +1,383 @@
-const { app, BrowserWindow, Tray, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, shell, Notification } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
+const https = require('https');
+const crypto = require('crypto');
 const { autoUpdater } = require('electron-updater');
 
 let mainWindow;
+let pendingDeepLink = null;
 let serverProcess;
 let tray;
 let isQuitting = false;
 let isManualUpdateCheck = false;
 let isDownloadInProgress = false;
 let themedDialogCounter = 0;
+let reminderPollInterval = null;
+const gmailTokenPath = path.join(app.getPath('userData'), 'gmail-oauth.json');
+
+function base64UrlEncode(buffer) {
+  return Buffer.from(buffer)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function httpFormPost(url, formObj) {
+  const body = new URLSearchParams(formObj).toString();
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(body)
+        }
+      },
+      (res) => {
+        let raw = '';
+        res.on('data', (c) => (raw += c));
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(JSON.parse(raw));
+            } catch (e) {
+              reject(new Error('Invalid JSON response from token endpoint'));
+            }
+          } else {
+            reject(new Error(`Token request failed: ${res.statusCode} ${raw}`));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function httpJsonGet(url, accessToken) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      url,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
+      },
+      (res) => {
+        let raw = '';
+        res.on('data', (c) => (raw += c));
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(JSON.parse(raw));
+            } catch (e) {
+              reject(new Error('Invalid JSON response'));
+            }
+          } else {
+            reject(new Error(`GET failed: ${res.statusCode} ${raw}`));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function httpGmailSend(accessToken, rawMessage) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify({ raw: rawMessage });
+    const req = https.request(
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload)
+        }
+      },
+      (res) => {
+        let raw = '';
+        res.on('data', (c) => (raw += c));
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(JSON.parse(raw));
+            } catch (_e) {
+              resolve(raw);
+            }
+          } else {
+            reject(new Error(`Gmail send failed: ${res.statusCode} ${raw}`));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+function readGmailToken() {
+  try {
+    if (fs.existsSync(gmailTokenPath)) {
+      return JSON.parse(fs.readFileSync(gmailTokenPath, 'utf-8'));
+    }
+  } catch (e) {
+    console.warn('[Gmail] Failed to read token file:', e?.message || e);
+  }
+  return null;
+}
+
+function writeGmailToken(data) {
+  try {
+    fs.writeFileSync(gmailTokenPath, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.warn('[Gmail] Failed to write token file:', e?.message || e);
+  }
+}
+
+async function ensureFreshAccessToken(clientId, clientSecret) {
+  const tok = readGmailToken();
+  if (!tok || !tok.refresh_token) {
+    throw new Error('Not connected to Google');
+  }
+  const now = Date.now();
+  if (tok.access_token && tok.expires_at && now < tok.expires_at - 30_000) {
+    return tok.access_token;
+  }
+  const refreshed = await httpFormPost('https://oauth2.googleapis.com/token', {
+    client_id: clientId || tok.client_id,
+    client_secret: clientSecret || tok.client_secret || '',
+    grant_type: 'refresh_token',
+    refresh_token: tok.refresh_token
+  });
+  const expiresAt = Date.now() + (refreshed.expires_in || 3600) * 1000;
+  writeGmailToken({
+    ...tok,
+    client_id: clientId || tok.client_id,
+    client_secret: clientSecret || tok.client_secret || '',
+    access_token: refreshed.access_token,
+    expires_at: expiresAt
+  });
+  return refreshed.access_token;
+}
+
+async function gmailOAuthConnectFlow(clientId, clientSecret) {
+  if (!clientId || typeof clientId !== 'string') throw new Error('clientId is required');
+  if (!clientSecret || typeof clientSecret !== 'string') throw new Error('clientSecret is required');
+
+  const codeVerifier = base64UrlEncode(crypto.randomBytes(32));
+  const codeChallenge = base64UrlEncode(crypto.createHash('sha256').update(codeVerifier).digest());
+
+  // Loopback server on an ephemeral port
+  const server = http.createServer();
+  const codePromise = new Promise((resolve, reject) => {
+    server.on('request', (req, res) => {
+      try {
+        const urlObj = new URL(req.url, `http://${req.headers.host}`);
+        if (urlObj.pathname !== '/oauth2callback') {
+          res.statusCode = 404;
+          res.end('Not found');
+          return;
+        }
+        const code = urlObj.searchParams.get('code');
+        const err = urlObj.searchParams.get('error');
+        if (err) {
+          res.statusCode = 200;
+          res.end('Sign-in cancelled. You can close this tab.');
+          reject(new Error(`Google OAuth error: ${err}`));
+          return;
+        }
+        if (!code) {
+          res.statusCode = 400;
+          res.end('Missing code');
+          reject(new Error('Missing OAuth code'));
+          return;
+        }
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'text/html');
+        res.end('<html><body style="font-family:system-ui;background:#0f1115;color:#e5e7eb;padding:24px;">Connected. You can close this window.</body></html>');
+        resolve(code);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const redirectUri = `http://127.0.0.1:${port}/oauth2callback`;
+
+  const scopes = [
+    'https://www.googleapis.com/auth/gmail.send',
+    'openid',
+    'email'
+  ];
+  const authUrl =
+    'https://accounts.google.com/o/oauth2/v2/auth?' +
+    new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      access_type: 'offline',
+      prompt: 'consent',
+      scope: scopes.join(' '),
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256'
+    }).toString();
+
+  const authWin = new BrowserWindow({
+    width: 520,
+    height: 720,
+    resizable: true,
+    modal: true,
+    parent: mainWindow || undefined,
+    backgroundColor: '#0f1115',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+  authWin.loadURL(authUrl);
+
+  let code;
+  try {
+    code = await codePromise;
+  } finally {
+    try {
+      authWin.close();
+    } catch (_) { }
+    try {
+      server.close();
+    } catch (_) { }
+  }
+
+  const tokenRes = await httpFormPost('https://oauth2.googleapis.com/token', {
+    client_id: clientId,
+    client_secret: clientSecret,
+    code,
+    code_verifier: codeVerifier,
+    redirect_uri: redirectUri,
+    grant_type: 'authorization_code'
+  });
+
+  const expiresAt = Date.now() + (tokenRes.expires_in || 3600) * 1000;
+  const tokenData = {
+    client_id: clientId,
+    client_secret: clientSecret,
+    access_token: tokenRes.access_token,
+    refresh_token: tokenRes.refresh_token,
+    expires_at: expiresAt
+  };
+
+  // Get connected email (best effort)
+  let email = null;
+  try {
+    const profile = await httpJsonGet('https://www.googleapis.com/oauth2/v3/userinfo', tokenRes.access_token);
+    email = profile?.email || null;
+  } catch (_e) { }
+
+  writeGmailToken({ ...tokenData, email });
+  return { email };
+}
+
+
+function setupSpellcheckAndContextMenu(win) {
+  if (!win || win.isDestroyed()) return;
+
+  // Enable spellchecker dictionaries (best-effort)
+  try {
+    const locale = app.getLocale ? app.getLocale() : 'en-US';
+    const normalized = typeof locale === 'string' && locale.includes('-') ? locale : 'en-US';
+    win.webContents.session.setSpellCheckerLanguages([normalized]);
+  } catch (e) {
+    console.warn('[Spellcheck] Unable to set spellchecker languages:', e?.message || e);
+  }
+
+  // Right-click menu with spellcheck suggestions
+  win.webContents.on('context-menu', (_event, params) => {
+    try {
+      const template = [];
+
+      // Spellcheck suggestions (only show when Chromium marked a misspelled word)
+      if (params.misspelledWord) {
+        const suggestions = Array.isArray(params.dictionarySuggestions) ? params.dictionarySuggestions : [];
+
+        if (suggestions.length > 0) {
+          suggestions.slice(0, 8).forEach((suggestion) => {
+            template.push({
+              label: suggestion,
+              click: () => {
+                try {
+                  win.webContents.replaceMisspelling(suggestion);
+                } catch (_) { }
+              }
+            });
+          });
+        } else {
+          template.push({ label: 'No suggestions', enabled: false });
+        }
+
+        template.push({ type: 'separator' });
+        template.push({
+          label: `Add "${params.misspelledWord}" to dictionary`,
+          click: () => {
+            try {
+              win.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord);
+            } catch (_) { }
+          }
+        });
+        template.push({ type: 'separator' });
+      }
+
+      // Editing actions
+      if (params.isEditable) {
+        template.push(
+          { role: 'undo', enabled: params.editFlags?.canUndo },
+          { role: 'redo', enabled: params.editFlags?.canRedo },
+          { type: 'separator' },
+          { role: 'cut', enabled: params.editFlags?.canCut },
+          { role: 'copy', enabled: params.editFlags?.canCopy },
+          { role: 'paste', enabled: params.editFlags?.canPaste },
+          { role: 'delete', enabled: params.editFlags?.canDelete },
+          { type: 'separator' },
+          { role: 'selectAll' }
+        );
+      } else {
+        if (params.selectionText) {
+          template.push({ role: 'copy' });
+          template.push({ type: 'separator' });
+        }
+      }
+
+      // Link actions (optional)
+      if (params.linkURL) {
+        template.push({
+          label: 'Open Link',
+          click: () => shell.openExternal(params.linkURL)
+        });
+        template.push({ type: 'separator' });
+      }
+
+      // Nothing to show
+      if (template.length === 0) return;
+
+      const menu = Menu.buildFromTemplate(template);
+      menu.popup({ window: win });
+    } catch (e) {
+      console.warn('[ContextMenu] Failed to show context menu:', e?.message || e);
+    }
+  });
+}
 
 
 function loadPrereleaseSetting() {
@@ -171,14 +537,14 @@ function showFirstBootWelcome() {
     // Skip in development
     return;
   }
-  
+
   const welcomeFlagPath = path.join(app.getPath('userData'), '.welcome-shown');
-  
+
   // Check if welcome has been shown before
   if (fs.existsSync(welcomeFlagPath)) {
     return;
   }
-  
+
   // Wait for window to be ready, then show welcome
   setTimeout(() => {
     if (mainWindow) {
@@ -187,10 +553,10 @@ function showFirstBootWelcome() {
         title: 'Welcome to Job Application Tracker!',
         message: 'Quick Tip: Minimizing to Tray',
         detail: 'When you close the window using the X button, the app will minimize to the system tray and continue running in the background.\n\n' +
-                'To fully quit the application:\n' +
-                '• Right-click the tray icon (in your system tray)\n' +
-                '• Select "Quit"\n\n' +
-                'This allows the app to keep running so you can quickly access it again!',
+          'To fully quit the application:\n' +
+          '• Right-click the tray icon (in your system tray)\n' +
+          '• Select "Quit"\n\n' +
+          'This allows the app to keep running so you can quickly access it again!',
         buttons: ['Got it!'],
         defaultId: 0
       }).then(() => {
@@ -214,20 +580,20 @@ function createTray() {
   try {
     const { nativeImage } = require('electron');
     let iconPath = null;
-    
+
     // In production, try multiple possible locations for the icon
     if (app.isPackaged) {
       // Try resources path first (where extraResources are placed)
       const resourcesPath = process.resourcesPath || __dirname;
-      
+
       // Try icon.ico first (better for Windows), then icon.png
       const iconIcoPath = path.join(resourcesPath, 'icon.ico');
       const iconPngPath = path.join(resourcesPath, 'icon.png');
-      
+
       // Also try in the app directory (if icon is bundled with app)
       const appIconIcoPath = path.join(__dirname, 'icon.ico');
       const appIconPngPath = path.join(__dirname, 'icon.png');
-      
+
       if (fs.existsSync(iconIcoPath)) {
         iconPath = iconIcoPath;
       } else if (fs.existsSync(iconPngPath)) {
@@ -248,14 +614,14 @@ function createTray() {
       // Development: use __dirname
       const iconIcoPath = path.join(__dirname, 'icon.ico');
       const iconPngPath = path.join(__dirname, 'icon.png');
-      
+
       if (fs.existsSync(iconIcoPath)) {
         iconPath = iconIcoPath;
       } else if (fs.existsSync(iconPngPath)) {
         iconPath = iconPngPath;
       }
     }
-    
+
     if (iconPath) {
       // Create native image from path
       const iconImage = nativeImage.createFromPath(iconPath);
@@ -336,6 +702,520 @@ function waitForServer(url, timeoutMs = 15000) {
   });
 }
 
+function apiRequest(method, apiPath, body) {
+  return new Promise((resolve, reject) => {
+    const data = body ? JSON.stringify(body) : null;
+    const req = http.request(
+      {
+        hostname: 'localhost',
+        port: 3000,
+        path: `/api${apiPath.startsWith('/') ? apiPath : `/${apiPath}`}`,
+        method,
+        headers: data
+          ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
+          : undefined
+      },
+      (res) => {
+        let raw = '';
+        res.on('data', (chunk) => (raw += chunk));
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(raw ? JSON.parse(raw) : null);
+            } catch (_e) {
+              resolve(raw);
+            }
+          } else {
+            reject(new Error(`API ${method} ${apiPath} failed: ${res.statusCode} ${raw}`));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    if (data) req.write(data);
+    req.end();
+  });
+}
+
+async function fetchAppSettings() {
+  try {
+    const s = await apiRequest('GET', '/settings', null);
+    return s || {};
+  } catch (_e) {
+    return {};
+  }
+}
+
+async function deliverDesktopNotifications(settings) {
+  try {
+    const now = new Date().toISOString();
+    const pending = await apiRequest(
+      'GET',
+      `/notifications/pending?channel=desktop&now=${encodeURIComponent(now)}&limit=50`,
+      null
+    );
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    const threshold = parseInt(settings.notification_desktop_summary_threshold || '5', 10) || 5;
+    const count = pending.length;
+
+    const markAllDelivered = async () => {
+      await Promise.all(
+        pending.map((n) =>
+          apiRequest('POST', `/notifications/${n.id}/delivered`, { channel: 'desktop' }).catch(() => null)
+        )
+      );
+    };
+
+    if (Notification && Notification.isSupported && !Notification.isSupported()) {
+      await markAllDelivered();
+      return;
+    }
+
+    if (count >= threshold) {
+      const notif = new Notification({
+        title: 'Follow-ups due',
+        body: `${count} items need attention. Open the app to review.`,
+        silent: false
+      });
+      notif.on('click', () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+          mainWindow.loadURL(`http://localhost:3000/?notifications=1`).catch(() => { });
+        }
+      });
+      notif.show();
+      await markAllDelivered();
+      return;
+    }
+
+    // Under threshold: show a few individual popups, but mark all as delivered
+    for (const n of pending.slice(0, 5)) {
+      const notif = new Notification({
+        title: n.title || 'Follow-up reminder',
+        body: n.message || 'Reminder due',
+        silent: false
+      });
+      notif.on('click', () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+          if (n.link_path) {
+            mainWindow.loadURL(`http://localhost:3000${n.link_path}`).catch(() => { });
+          } else {
+            mainWindow.loadURL(`http://localhost:3000/?notifications=1`).catch(() => { });
+          }
+        }
+      });
+      notif.show();
+    }
+    await markAllDelivered();
+  } catch (_e) {
+    // Ignore transient errors
+  }
+}
+
+// Legacy helper (kept for completeness; not currently used for reminders)
+async function sendEmailToSelf(subject, body, clientIdOverride, recipientOverride) {
+  const tok = readGmailToken();
+  const clientId = clientIdOverride || tok?.client_id;
+  const clientSecret = tok?.client_secret || '';
+  if (!clientId) throw new Error('Missing Gmail client ID');
+  if (!tok?.email) throw new Error('Connected email unknown');
+  const to = recipientOverride || tok.email;
+  const accessToken = await ensureFreshAccessToken(clientId, clientSecret);
+  const mime =
+    `To: ${to}\r\n` +
+    `Subject: ${subject}\r\n` +
+    'Content-Type: text/plain; charset="UTF-8"\r\n' +
+    '\r\n' +
+    body +
+    '\r\n';
+  const raw = base64UrlEncode(Buffer.from(mime, 'utf-8'));
+  await httpGmailSend(accessToken, raw);
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatDueNoSeconds(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+}
+
+function primaryLabel(n) {
+  if (n.primary_label) return n.primary_label;
+  return n.message || 'Follow-up reminder';
+}
+
+async function hydrateNotificationLabels(pending) {
+  try {
+    const contactIds = new Set();
+    const jobIds = new Set();
+    const companyIds = new Set();
+    const interactionIds = new Set();
+
+    for (const n of pending) {
+      const path = typeof n.link_path === 'string' ? n.link_path : '';
+      const parts = path.split('/');
+      if (parts.length >= 3) {
+        const type = parts[1];
+        const idNum = parseInt(parts[2], 10);
+        if (!Number.isFinite(idNum)) continue;
+        if (type === 'contacts') contactIds.add(idNum);
+        else if (type === 'job') jobIds.add(idNum);
+        else if (type === 'company') companyIds.add(idNum);
+      }
+
+      if (n.entity_type === 'interaction' && Number.isFinite(n.entity_id)) {
+        interactionIds.add(n.entity_id);
+      }
+    }
+
+    const contacts = {};
+    const jobs = {};
+    const companies = {};
+    const interactions = {};
+
+    await Promise.all([
+      Promise.all(
+        Array.from(contactIds).map(async (id) => {
+          try {
+            const c = await apiRequest('GET', `/contacts/${id}`, null);
+            if (c) contacts[id] = c;
+          } catch (_e) {
+            // ignore missing
+          }
+        })
+      ),
+      Promise.all(
+        Array.from(jobIds).map(async (id) => {
+          try {
+            const j = await apiRequest('GET', `/jobs/${id}`, null);
+            if (j) jobs[id] = j;
+          } catch (_e) {
+            // ignore missing
+          }
+        })
+      ),
+      Promise.all(
+        Array.from(companyIds).map(async (id) => {
+          try {
+            const co = await apiRequest('GET', `/companies/${id}`, null);
+            if (co) companies[id] = co;
+          } catch (_e) {
+            // ignore missing
+          }
+        })
+      ),
+      Promise.all(
+        Array.from(interactionIds).map(async (id) => {
+          try {
+            const i = await apiRequest('GET', `/interactions/${id}`, null);
+            if (i) interactions[id] = i;
+          } catch (_e) {
+            // ignore missing
+          }
+        })
+      )
+    ]);
+
+    function buildLabel(n) {
+      const path = typeof n.link_path === 'string' ? n.link_path : '';
+      const parts = path.split('/');
+      let contactName = null;
+      let companyName = null;
+      let jobTitle = null;
+
+      if (parts.length >= 3) {
+        const type = parts[1];
+        const idNum = parseInt(parts[2], 10);
+        if (Number.isFinite(idNum)) {
+          if (type === 'contacts') {
+            const c = contacts[idNum];
+            if (c) {
+              contactName = c.name || null;
+              companyName = c.company_name || null;
+            }
+          } else if (type === 'job') {
+            const j = jobs[idNum];
+            if (j) {
+              jobTitle = j.title || null;
+              companyName = (j.company && j.company.name) || j.company_name || companyName;
+            }
+          } else if (type === 'company') {
+            const co = companies[idNum];
+            if (co) {
+              companyName = co.name || null;
+            }
+          }
+        }
+      }
+
+      if (n.entity_type === 'interaction') {
+        const i = interactions[n.entity_id] || null;
+        if (i) {
+          contactName = i.contact_name || contactName;
+          companyName = i.company_name || companyName;
+          jobTitle = i.job_title || jobTitle;
+        }
+      }
+
+      if (contactName && companyName) return `${contactName} @ ${companyName}`;
+      if (contactName) return contactName;
+      if (jobTitle && companyName) return `${jobTitle} @ ${companyName}`;
+      if (jobTitle) return jobTitle;
+      if (companyName) return `Follow-up reminder @ ${companyName}`;
+      return 'Follow-up reminder';
+    }
+
+    for (const n of pending) {
+      n.primary_label = buildLabel(n);
+    }
+  } catch (_e) {
+    // If enrichment fails, we still fall back to message-based labels
+  }
+}
+
+function buildSummaryEmailHtml(pending, baseUrl) {
+  const groups = { contact: [], company: [], interaction: [], other: [] };
+  for (const n of pending) {
+    const t = n.entity_type;
+    if (t === 'contact') groups.contact.push(n);
+    else if (t === 'company') groups.company.push(n);
+    else if (t === 'interaction') groups.interaction.push(n);
+    else groups.other.push(n);
+  }
+
+  function section(title, items) {
+    if (!items || items.length === 0) return '';
+    const rows = items
+      .map((n) => {
+        const who = escapeHtml(primaryLabel(n));
+        const msg = escapeHtml(n.message || '');
+        const due = n.due_at ? escapeHtml(formatDueNoSeconds(n.due_at)) : '';
+        const httpLink = n.link_path ? `${baseUrl}${n.link_path}` : `${baseUrl}/?notifications=1`;
+        const deepLink = n.link_path ? `jobtracker://open?path=${encodeURIComponent(n.link_path)}` : 'jobtracker://open';
+        return `
+          <tr>
+            <td style="padding:12px 12px;border-top:1px solid #2d3139;">
+              <div style="font-weight:700;color:#e5e7eb;margin-bottom:2px;">${who}</div>
+              <div style="color:#9ca3af;font-size:12px;margin-bottom:4px;">${msg}</div>
+              <div style="color:#6b7280;font-size:12px;">Due: ${due}</div>
+              <div style="margin-top:8px;">
+                <a href="${escapeHtml(deepLink)}" style="color:#3b82f6;text-decoration:none;">Open in app</a>
+                <div style="color:#4b5563;font-size:11px;margin-top:2px;">
+                  If that doesn't work, open: <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
+                </div>
+              </div>
+            </td>
+          </tr>
+        `;
+      })
+      .join('\n');
+
+    return `
+      <div style="margin-top:18px;">
+        <div style="font-size:14px;font-weight:800;color:#fbbf24;margin-bottom:8px;">${escapeHtml(title)}</div>
+        <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border:1px solid #2d3139;border-radius:10px;overflow:hidden;background:#0f1115;">
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  const total = pending.length;
+  return `
+    <div style="background:#0f1115;color:#e5e7eb;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;padding:24px;">
+      <div style="max-width:720px;margin:0 auto;">
+        <div style="font-size:18px;font-weight:900;color:#fbbf24;margin-bottom:6px;">Job Application Tracker</div>
+        <div style="font-size:14px;color:#9ca3af;margin-bottom:16px;">
+          You have <strong style="color:#e5e7eb;">${total}</strong> follow-up${total === 1 ? '' : 's'} due.
+        </div>
+
+        ${section('Contacts', groups.contact)}
+        ${section('Companies', groups.company)}
+        ${section('Interactions', groups.interaction)}
+        ${section('Other', groups.other)}
+
+        <div style="margin-top:22px;color:#6b7280;font-size:12px;line-height:1.4;">
+          Tip: Open the app and click <strong style="color:#9ca3af;">Alerts</strong> to view and dismiss items.
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function buildSummaryEmailText(pending, baseUrl) {
+  const lines = pending.map((n) => {
+    const who = primaryLabel(n);
+    const due = n.due_at ? formatDueNoSeconds(n.due_at) : '';
+    const httpLink = n.link_path ? `${baseUrl}${n.link_path}` : `${baseUrl}/?notifications=1`;
+    const deepLink = n.link_path ? `jobtracker://open?path=${encodeURIComponent(n.link_path)}` : 'jobtracker://open';
+    return `- ${who}: ${n.message}${due ? ` (due ${due})` : ''}\n  Open in app: ${deepLink}\n  Or in browser: ${httpLink}`;
+  });
+  return lines.join('\n\n');
+}
+
+async function sendEmailToSelfHtml(subject, htmlBody, textBody, clientIdOverride, recipientOverride) {
+  const tok = readGmailToken();
+  const clientId = clientIdOverride || tok?.client_id;
+  const clientSecret = tok?.client_secret || '';
+  if (!clientId) throw new Error('Missing Gmail client ID');
+  if (!tok?.email) throw new Error('Connected email unknown');
+  const accessToken = await ensureFreshAccessToken(clientId, clientSecret);
+  const to = recipientOverride || tok.email;
+
+  const boundary = `b_${crypto.randomBytes(12).toString('hex')}`;
+  const mime =
+    `To: ${to}\r\n` +
+    `Subject: ${subject}\r\n` +
+    `MIME-Version: 1.0\r\n` +
+    `Content-Type: multipart/alternative; boundary="${boundary}"\r\n` +
+    `\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Type: text/plain; charset="UTF-8"\r\n\r\n` +
+    `${textBody}\r\n\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Type: text/html; charset="UTF-8"\r\n\r\n` +
+    `${htmlBody}\r\n\r\n` +
+    `--${boundary}--\r\n`;
+
+  const raw = base64UrlEncode(Buffer.from(mime, 'utf-8'));
+  await httpGmailSend(accessToken, raw);
+}
+
+async function deliverEmailNotifications(settings) {
+  try {
+    const gmailEnabled = String(settings.gmail_enabled || 'false') === 'true';
+    const smtpEnabled = String(settings.smtp_enabled || 'false') === 'true';
+    const priority = (settings.email_provider_priority || 'gmail').trim();
+    const clientId = settings.gmail_client_id || null;
+    const recipient = (settings.gmail_recipient || '').trim() || null;
+
+    // Check which providers are actually usable
+    let gmailUsable = false;
+    if (gmailEnabled) {
+      const tok = readGmailToken();
+      if (tok?.refresh_token) {
+        gmailUsable = true;
+        if (clientId && tok.client_id !== clientId) {
+          writeGmailToken({ ...tok, client_id: clientId });
+        }
+      }
+    }
+    const smtpUsable = smtpEnabled && !!settings.smtp_host;
+
+    // Pick provider based on user's chosen priority
+    let provider = null; // 'gmail' | 'smtp'
+    if (priority === 'smtp') {
+      if (smtpUsable) provider = 'smtp';
+      else if (gmailUsable) provider = 'gmail';
+    } else {
+      if (gmailUsable) provider = 'gmail';
+      else if (smtpUsable) provider = 'smtp';
+    }
+    if (!provider) return;
+
+    const now = new Date().toISOString();
+    const pending = await apiRequest(
+      'GET',
+      `/notifications/pending?channel=email&now=${encodeURIComponent(now)}&limit=50`,
+      null
+    );
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    await hydrateNotificationLabels(pending);
+
+    const threshold = parseInt(settings.notification_email_summary_threshold || '5', 10) || 5;
+    const count = pending.length;
+    const base = 'http://localhost:3000';
+
+    async function sendViaProvider(subject, html, text) {
+      if (provider === 'gmail') {
+        await sendEmailToSelfHtml(subject, html, text, clientId, recipient);
+      } else {
+        // SMTP — delegate to server
+        await apiRequest('POST', '/smtp/send', { subject, html, text });
+      }
+    }
+
+    if (count >= threshold) {
+      const html = buildSummaryEmailHtml(pending, base);
+      const text = buildSummaryEmailText(pending, base);
+      await sendViaProvider(`Follow-up reminders (${count})`, html, text);
+      await Promise.all(
+        pending.map((n) => apiRequest('POST', `/notifications/${n.id}/delivered`, { channel: 'email' }).catch(() => null))
+      );
+      return;
+    }
+
+    // Under threshold: individual emails
+    for (const n of pending) {
+      const linkPath = n.link_path || '/?notifications=1';
+      const deepLink = `jobtracker://open?path=${encodeURIComponent(n.link_path || '/?notifications=1')}`;
+      const httpLink = `${base}${linkPath}`;
+      const who = primaryLabel(n);
+      const due = n.due_at ? formatDueNoSeconds(n.due_at) : '';
+      const text = `${n.message}${due ? `\n\nDue: ${due}` : ''}\n\n${who}\nOpen in app: ${deepLink}\nOpen in browser: ${httpLink}`;
+      const html = `
+        <div style="background:#0f1115;color:#e5e7eb;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;padding:24px;">
+          <div style="max-width:720px;margin:0 auto;">
+            <div style="font-size:18px;font-weight:900;color:#fbbf24;margin-bottom:10px;">Job Application Tracker</div>
+            <div style="font-size:14px;color:#e5e7eb;font-weight:800;margin-bottom:6px;">${escapeHtml(who)}</div>
+            <div style="color:#e5e7eb;line-height:1.4;margin-bottom:4px;">${escapeHtml(n.message || '')}</div>
+            ${due ? `<div style="color:#6b7280;font-size:12px;margin-bottom:12px;">Due: ${escapeHtml(due)}</div>` : ''}
+            <a href="${escapeHtml(deepLink)}" style="display:inline-block;padding:10px 14px;background:#3b82f6;color:#fff;text-decoration:none;border-radius:8px;font-weight:700;">Open in app</a>
+            <div style="color:#4b5563;font-size:11px;margin-top:8px;">
+              If that doesn't work, open in your browser: <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
+            </div>
+          </div>
+        </div>
+      `;
+      await sendViaProvider(`Follow-up reminder for ${who}`, html, text);
+      await apiRequest('POST', `/notifications/${n.id}/delivered`, { channel: 'email' });
+    }
+  } catch (e) {
+    console.warn('[EmailReminders] Failed to send reminder email:', e?.message || e);
+  }
+}
+
+async function pollNotifications() {
+  const settings = await fetchAppSettings();
+  await apiRequest('POST', '/notifications/sync-due', { now: new Date().toISOString() }).catch(() => null);
+  await deliverDesktopNotifications(settings);
+  await deliverEmailNotifications(settings);
+}
+
+function startReminderPolling() {
+  if (reminderPollInterval) return;
+  pollNotifications();
+  reminderPollInterval = setInterval(pollNotifications, 30 * 1000);
+}
+
+function stopReminderPolling() {
+  if (reminderPollInterval) {
+    clearInterval(reminderPollInterval);
+    reminderPollInterval = null;
+  }
+}
+
 function updateSplashStatus(message, progress) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const script = `
@@ -343,7 +1223,28 @@ function updateSplashStatus(message, progress) {
       window.__updateSplash(${JSON.stringify(message)}, ${typeof progress === 'number' ? progress : 'undefined'});
     }
   `;
-  mainWindow.webContents.executeJavaScript(script).catch(() => {});
+  mainWindow.webContents.executeJavaScript(script).catch(() => { });
+}
+
+function handleDeepLink(url) {
+  if (!url) return;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'jobtracker:') return;
+    const pathParam = parsed.searchParams.get('path');
+    const targetPath = pathParam || parsed.pathname || '/';
+    const safePath = targetPath.startsWith('/') ? targetPath : `/${targetPath}`;
+    const targetUrl = `http://localhost:3000${safePath}`;
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.loadURL(targetUrl).catch(() => { });
+    } else {
+      pendingDeepLink = url;
+    }
+  } catch (e) {
+    console.warn('[DeepLink] Failed to handle URL:', e?.message || e);
+  }
 }
 
 function createWindow() {
@@ -357,18 +1258,24 @@ function createWindow() {
     windowIcon = iconPngPath;
   }
 
+  const startHidden = process.argv.includes('--hidden');
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     backgroundColor: '#0f1115',
-    show: true,
+    show: !startHidden,
     icon: windowIcon,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      // Enable Chromium spellchecker for all inputs/textareas/contenteditable
+      spellcheck: true
     }
   });
+
+  setupSpellcheckAndContextMenu(mainWindow);
 
   // Show a lightweight splash immediately
   mainWindow.loadURL('data:text/html;charset=utf-8,' +
@@ -445,7 +1352,15 @@ function createWindow() {
     .then(() => {
       updateSplashStatus('Loading interface...', 90);
       if (mainWindow) {
-        mainWindow.loadURL('http://localhost:3000');
+        startReminderPolling();
+        const target = pendingDeepLink ? null : 'http://localhost:3000';
+        if (target) {
+          mainWindow.loadURL(target);
+        }
+        if (pendingDeepLink) {
+          handleDeepLink(pendingDeepLink);
+          pendingDeepLink = null;
+        }
       }
     })
     .catch((err) => {
@@ -502,7 +1417,7 @@ function startServer() {
 
   // Always use bundled Node.js (self-contained, no dependencies required)
   let nodeExecutable = 'node'; // Default to system node (for development)
-  
+
   if (app.isPackaged) {
     // In production, always use bundled Node.js
     const bundledNodePath = path.join(process.resourcesPath, 'node.exe');
@@ -524,7 +1439,7 @@ function startServer() {
     // In production, use 'pipe' to hide console; in dev, use 'inherit' to see logs
     stdio: app.isPackaged ? ['ignore', 'ignore', 'ignore'] : 'inherit'
   };
-  
+
   serverProcess = spawn(nodeExecutable, [serverPath], spawnOptions);
 
   serverProcess.on('error', (error) => {
@@ -569,7 +1484,7 @@ function showDownloadOverlay(version) {
       document.head.appendChild(style);
       document.body.appendChild(overlay);
     })();
-  `).catch(() => {});
+  `).catch(() => { });
 }
 
 function updateDownloadOverlay(percent, bytesPerSecond, transferred, total) {
@@ -590,7 +1505,7 @@ function updateDownloadOverlay(percent, bytesPerSecond, transferred, total) {
       if (pctEl) pctEl.textContent = '${pct}%  (${dlMB} / ${totalMB} MB)';
       if (speedEl) speedEl.textContent = '${speed}';
     })();
-  `).catch(() => {});
+  `).catch(() => { });
 }
 
 function removeDownloadOverlay() {
@@ -602,7 +1517,7 @@ function removeDownloadOverlay() {
       var st = document.getElementById('update-download-style');
       if (st) st.remove();
     })();
-  `).catch(() => {});
+  `).catch(() => { });
 }
 
 // Auto-updater event handlers
@@ -671,7 +1586,7 @@ function setupAutoUpdater() {
   autoUpdater.on('error', (err) => {
     const errMsg = err.message || err.toString() || '';
     console.error('[Auto-updater] Error:', errMsg);
-    
+
     // Clean up any download UI
     const wasDownloading = isDownloadInProgress;
     isDownloadInProgress = false;
@@ -679,7 +1594,7 @@ function setupAutoUpdater() {
       mainWindow.setProgressBar(-1);
     }
     removeDownloadOverlay();
-    
+
     // Show error dialog if user explicitly triggered the check OR a download was in progress
     if ((isManualUpdateCheck || wasDownloading) && mainWindow) {
       let title = 'Update Check';
@@ -690,27 +1605,27 @@ function setupAutoUpdater() {
         title = 'Download Failed';
         message = 'The update download failed.';
         detail = 'An error occurred while downloading the update.\n\nPlease try again later.\n\n' +
-                 `Error: ${errMsg}`;
-      } else if (errMsg.includes('net::ERR_INTERNET_DISCONNECTED') || 
-          errMsg.includes('ENOTFOUND') ||
-          errMsg.includes('ECONNREFUSED') ||
-          errMsg.includes('getaddrinfo')) {
+          `Error: ${errMsg}`;
+      } else if (errMsg.includes('net::ERR_INTERNET_DISCONNECTED') ||
+        errMsg.includes('ENOTFOUND') ||
+        errMsg.includes('ECONNREFUSED') ||
+        errMsg.includes('getaddrinfo')) {
         message = 'No internet connection.';
         detail = 'Please check your internet connection and try again.';
       } else if (errMsg.includes('404') || errMsg.includes('Not Found') ||
-                 errMsg.includes('406') || errMsg.includes('Not Acceptable') ||
-                 errMsg.includes('Unable to find latest version') ||
-                 errMsg.includes('HttpError')) {
+        errMsg.includes('406') || errMsg.includes('Not Acceptable') ||
+        errMsg.includes('Unable to find latest version') ||
+        errMsg.includes('HttpError')) {
         message = 'No published updates found.';
         detail = 'No compatible release was found on GitHub.\n\n' +
-                 'This usually means the release is missing the required latest.yml file, ' +
-                 'or no full releases have been published yet.\n\n' +
-                 `Current version: v${app.getVersion()}`;
+          'This usually means the release is missing the required latest.yml file, ' +
+          'or no full releases have been published yet.\n\n' +
+          `Current version: v${app.getVersion()}`;
       } else {
         message = 'Update check failed.';
         detail = 'An unexpected error occurred while checking for updates.\n\n' +
-                 'You can continue using the app normally.\n\n' +
-                 `Error: ${errMsg}`;
+          'You can continue using the app normally.\n\n' +
+          `Error: ${errMsg}`;
       }
 
       showThemedDialog({
@@ -728,12 +1643,12 @@ function setupAutoUpdater() {
   autoUpdater.on('download-progress', (progressObj) => {
     const percent = progressObj.percent.toFixed(1);
     console.log(`[Auto-updater] Download: ${percent}% (${progressObj.transferred}/${progressObj.total})`);
-    
+
     // Update the Windows taskbar progress bar
     if (mainWindow) {
       mainWindow.setProgressBar(progressObj.percent / 100);
     }
-    
+
     // Update the in-app download overlay
     updateDownloadOverlay(progressObj.percent, progressObj.bytesPerSecond, progressObj.transferred, progressObj.total);
   });
@@ -741,12 +1656,12 @@ function setupAutoUpdater() {
   autoUpdater.on('update-downloaded', (info) => {
     console.log('[Auto-updater] Update downloaded:', info.version);
     isDownloadInProgress = false;
-    
+
     // Clear taskbar progress and remove overlay
     if (mainWindow) {
       mainWindow.setProgressBar(-1);
       removeDownloadOverlay();
-      
+
       // Small delay to let the overlay removal complete before showing the dialog
       setTimeout(() => {
         showThemedDialog({
@@ -807,7 +1722,7 @@ function checkForUpdates(manual = false) {
 
   isManualUpdateCheck = manual;
   console.log(`[Auto-updater] checkForUpdates called (manual: ${manual}, allowPrerelease: ${autoUpdater.allowPrerelease})`);
-  
+
   // Just call checkForUpdates — all UI is handled by event handlers above
   autoUpdater.checkForUpdates().catch((err) => {
     // The 'error' event handler will show the dialog if needed.
@@ -815,6 +1730,58 @@ function checkForUpdates(manual = false) {
     console.error('[Auto-updater] checkForUpdates promise rejected:', err.message || err);
   });
 }
+
+// IPC handler to open URLs in the system's default browser
+ipcMain.handle('open-external', async (_event, url) => {
+  if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+    await shell.openExternal(url);
+  }
+});
+
+// Gmail OAuth (BYO client ID)
+ipcMain.handle('gmail-oauth-status', async () => {
+  const tok = readGmailToken();
+  return { connected: !!tok?.refresh_token, email: tok?.email || null };
+});
+
+ipcMain.handle('gmail-oauth-disconnect', async () => {
+  try {
+    if (fs.existsSync(gmailTokenPath)) fs.unlinkSync(gmailTokenPath);
+  } catch (e) {
+    console.warn('[Gmail] Failed to delete token file:', e?.message || e);
+  }
+  return { ok: true };
+});
+
+ipcMain.handle('gmail-oauth-connect', async (_event, payload) => {
+  const clientId = payload?.clientId;
+  const clientSecret = payload?.clientSecret;
+  const result = await gmailOAuthConnectFlow(clientId, clientSecret);
+  return result;
+});
+
+ipcMain.handle('gmail-send-test', async (_event, payload) => {
+  const tok = readGmailToken();
+  const clientId = payload?.clientId || tok?.client_id;
+  const clientSecret = tok?.client_secret || '';
+  if (!clientId) throw new Error('Missing client ID. Paste it in Settings first.');
+  const email = tok?.email;
+  if (!email) throw new Error('Connected email unknown. Reconnect Google and try again.');
+  const subject = payload?.subject || 'Test email';
+  const body = payload?.body || 'Test';
+
+  const accessToken = await ensureFreshAccessToken(clientId, clientSecret);
+  const mime =
+    `To: ${email}\r\n` +
+    `Subject: ${subject}\r\n` +
+    'Content-Type: text/plain; charset="UTF-8"\r\n' +
+    '\r\n' +
+    body +
+    '\r\n';
+  const raw = base64UrlEncode(Buffer.from(mime, 'utf-8'));
+  await httpGmailSend(accessToken, raw);
+  return { ok: true };
+});
 
 // IPC handler so renderer (Settings page) can trigger update checks
 ipcMain.handle('check-for-updates', async () => {
@@ -827,10 +1794,84 @@ ipcMain.handle('check-for-updates', async () => {
   checkForUpdates(true);
 });
 
+// Check for updates periodically
+// ...
+
+// Register custom protocol
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('jobtracker', process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient('jobtracker');
+}
+
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  if (url.startsWith('jobtracker://')) {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      handleDeepLink(url);
+    } else {
+      pendingDeepLink = url;
+    }
+  }
+});
+
+// Prevent multiple instances — if another instance launches (e.g. deep link), focus the existing one
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    if (process.platform === 'win32') {
+      const urlArg = argv.find((arg) => typeof arg === 'string' && arg.startsWith('jobtracker://'));
+      if (urlArg) {
+        handleDeepLink(urlArg);
+        return;
+      }
+    }
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
+// On Windows, the protocol URL is passed as a command-line argument to the first instance
+if (process.platform === 'win32') {
+  const urlArg = process.argv.find((arg) => typeof arg === 'string' && arg.startsWith('jobtracker://'));
+  if (urlArg) {
+    pendingDeepLink = urlArg;
+  }
+}
+
+// On macOS, handle jobtracker:// links via open-url
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url);
+});
+
 app.whenReady().then(() => {
   // Remove the menu bar (File, Edit, View, Window, Help)
   Menu.setApplicationMenu(null);
-  
+
+  // On Windows, register app to start on login (hidden to tray)
+  if (process.platform === 'win32' && app.isPackaged) {
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        path: process.execPath,
+        args: ['--hidden']
+      });
+    } catch (e) {
+      console.warn('Failed to set login item settings:', e);
+    }
+  }
+
   createTray();
   createWindow();
   setupAutoUpdater();
@@ -848,6 +1889,7 @@ app.on('window-all-closed', () => {
   if (serverProcess) {
     serverProcess.kill();
   }
+  stopReminderPolling();
 
   if (process.platform !== 'darwin') {
     app.quit();
@@ -859,4 +1901,5 @@ app.on('before-quit', () => {
   if (serverProcess) {
     serverProcess.kill();
   }
+  stopReminderPolling();
 });
