@@ -61,6 +61,12 @@ function normalizeCityCore(name: string) {
   return n.replace(suffixPattern, '').trim();
 }
 
+// Same logic as normalizeCityCore but preserves original casing for display purposes.
+function formatDisplayName(name: string) {
+  const suffixPattern = /\s+(city|town|village|cdp|borough|municipality)$/i;
+  return name.replace(suffixPattern, '').trim();
+}
+
 const STATE_ABBR: Record<string, string> = {
   alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA',
   colorado: 'CO', connecticut: 'CT', delaware: 'DE', florida: 'FL', georgia: 'GA',
@@ -298,15 +304,15 @@ export default function USMap({ location, height = 200 }: USMapProps) {
       // Label text starts at xy[0] + labelStartOffset
       const labelStartX = xy[0] + labelStartOffset;
       const labelStartY = xy[1]; // Labels are vertically centered on the dot
-      
+
       // Distance from label start to target pin
       const dxT = labelStartX - targetXY[0];
       const dyT = labelStartY - targetXY[1];
       const distToTarget = Math.hypot(dxT, dyT);
-      
+
       // Also check if the dot itself is too close (for cities to the left of the pin)
       const dotDistToTarget = Math.hypot(xy[0] - targetXY[0], xy[1] - targetXY[1]);
-      
+
       // Reject if either the label start or the dot is too close to the target pin
       if (distToTarget < minDistToTarget || dotDistToTarget < minDistToTarget * 0.7) continue;
 
@@ -375,7 +381,7 @@ export default function USMap({ location, height = 200 }: USMapProps) {
               fontSize={refLabelSize}
               fontFamily="system-ui, sans-serif"
             >
-              {city.c}
+              {formatDisplayName(city.c)}
             </text>
           </g>
         ))}
@@ -393,7 +399,7 @@ export default function USMap({ location, height = 200 }: USMapProps) {
               fontWeight="bold"
               fontFamily="system-ui, sans-serif"
             >
-              {active.c}, {active.s}
+              {formatDisplayName(active.c)}, {active.s}
             </text>
           </g>
         )}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Bell } from 'lucide-react';
 
 interface Job {
   id: number;
@@ -14,6 +14,7 @@ interface Job {
   excitement_score: number;
   fit_score: number;
   created_at: string;
+  nearest_reminder?: string;
 }
 
 export default function JobBoard() {
@@ -195,9 +196,17 @@ export default function JobBoard() {
                 </div>
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', color: '#e5e7eb', lineHeight: '1.4' }}>
-                  {job.title}
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                  <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', color: '#e5e7eb', lineHeight: '1.4' }}>
+                    {job.title}
+                  </h3>
+                  {job.nearest_reminder && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', backgroundColor: '#fbbf2420', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem', flexShrink: 0 }} title="Upcoming Reminder">
+                      <Bell size={12} />
+                      {new Date(job.nearest_reminder).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    </div>
+                  )}
+                </div>
                 <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>
                   {job.company_name}
                   {job.location ? <span style={{ color: '#6b7280' }}> • {job.location}</span> : null}

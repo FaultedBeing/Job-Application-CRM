@@ -956,6 +956,11 @@ async function hydrateNotificationLabels(pending) {
             if (j) {
               jobTitle = j.title || null;
               companyName = (j.company && j.company.name) || j.company_name || companyName;
+
+              if (n.contact_id) {
+                const c = contacts[n.contact_id];
+                if (c) contactName = c.name;
+              }
             }
           } else if (type === 'company') {
             const co = companies[idNum];
@@ -975,10 +980,10 @@ async function hydrateNotificationLabels(pending) {
         }
       }
 
-      if (contactName && companyName) return `${contactName} @ ${companyName}`;
-      if (contactName) return contactName;
-      if (jobTitle && companyName) return `${jobTitle} @ ${companyName}`;
-      if (jobTitle) return jobTitle;
+      if (contactName && companyName) return `Reminder: ${contactName} @ ${companyName}`;
+      if (contactName) return `Reminder: ${contactName}`;
+      if (jobTitle && companyName) return `Reminder: ${jobTitle} @ ${companyName}`;
+      if (jobTitle) return `Reminder: ${jobTitle}`;
       if (companyName) return `Follow-up reminder @ ${companyName}`;
       return 'Follow-up reminder';
     }
@@ -1017,8 +1022,17 @@ function buildSummaryEmailHtml(pending, baseUrl) {
               <div style="color:#9ca3af;font-size:12px;margin-bottom:4px;">${msg}</div>
               <div style="color:#6b7280;font-size:12px;">Due: ${due}</div>
               <div style="margin-top:8px;">
-                <a href="${escapeHtml(deepLink)}" style="color:#3b82f6;text-decoration:none;">Open in app</a>
-                <div style="color:#4b5563;font-size:11px;margin-top:2px;">
+                <!--[if mso]>
+                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(deepLink)}" style="height:36px;v-text-anchor:middle;width:110px;" arcsize="20%" stroke="f" fillcolor="#3b82f6">
+                    <w:anchorlock/>
+                    <center>
+                  <![endif]-->
+                  <a href="${escapeHtml(deepLink)}" style="background-color:#3b82f6;border-radius:6px;color:#ffffff;display:inline-block;font-family:sans-serif;font-size:13px;font-weight:bold;line-height:36px;text-align:center;text-decoration:none;width:110px;-webkit-text-size-adjust:none;">Open in app</a>
+                  <!--[if mso]>
+                    </center>
+                  </v:roundrect>
+                <![endif]-->
+                <div style="color:#4b5563;font-size:11px;margin-top:4px;">
                   If that doesn't work, open: <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
                 </div>
               </div>
@@ -1181,14 +1195,25 @@ async function deliverEmailNotifications(settings) {
             <div style="font-size:14px;color:#e5e7eb;font-weight:800;margin-bottom:6px;">${escapeHtml(who)}</div>
             <div style="color:#e5e7eb;line-height:1.4;margin-bottom:4px;">${escapeHtml(n.message || '')}</div>
             ${due ? `<div style="color:#6b7280;font-size:12px;margin-bottom:12px;">Due: ${escapeHtml(due)}</div>` : ''}
-            <a href="${escapeHtml(deepLink)}" style="display:inline-block;padding:10px 14px;background:#3b82f6;color:#fff;text-decoration:none;border-radius:8px;font-weight:700;">Open in app</a>
+            <div>
+              <!--[if mso]>
+                <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(deepLink)}" style="height:40px;v-text-anchor:middle;width:120px;" arcsize="20%" stroke="f" fillcolor="#3b82f6">
+                  <w:anchorlock/>
+                  <center>
+                <![endif]-->
+                <a href="${escapeHtml(deepLink)}" style="background-color:#3b82f6;border-radius:8px;color:#ffffff;display:inline-block;font-family:sans-serif;font-size:14px;font-weight:bold;line-height:40px;text-align:center;text-decoration:none;width:120px;-webkit-text-size-adjust:none;">Open in app</a>
+                <!--[if mso]>
+                  </center>
+                </v:roundrect>
+              <![endif]-->
+            </div>
             <div style="color:#4b5563;font-size:11px;margin-top:8px;">
               If that doesn't work, open in your browser: <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
             </div>
           </div>
         </div>
       `;
-      await sendViaProvider(`Follow-up reminder for ${who}`, html, text);
+      await sendViaProvider(`${who}`, html, text);
       await apiRequest('POST', `/notifications/${n.id}/delivered`, { channel: 'email' });
     }
   } catch (e) {
@@ -1797,63 +1822,45 @@ ipcMain.handle('check-for-updates', async () => {
 // Check for updates periodically
 // ...
 
-// Register custom protocol
-if (process.defaultApp) {
-  if (process.argv.length >= 2) {
-    app.setAsDefaultProtocolClient('jobtracker', process.execPath, [path.resolve(process.argv[1])]);
-  }
-} else {
-  app.setAsDefaultProtocolClient('jobtracker');
-}
-
-app.on('open-url', (event, url) => {
-  event.preventDefault();
-  if (url.startsWith('jobtracker://')) {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-      handleDeepLink(url);
-    } else {
-      pendingDeepLink = url;
-    }
-  }
-});
-
-// Prevent multiple instances — if another instance launches (e.g. deep link), focus the existing one
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
-  app.on('second-instance', (_event, argv) => {
-    if (process.platform === 'win32') {
-      const urlArg = argv.find((arg) => typeof arg === 'string' && arg.startsWith('jobtracker://'));
-      if (urlArg) {
-        handleDeepLink(urlArg);
-        return;
-      }
-    }
+  // We got the lock. Listen for second instances.
+  app.on('second-instance', (_event, commandLine) => {
+    // When a second instance launches, it passes its command line args here.
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
     }
-  });
-}
 
-// On Windows, the protocol URL is passed as a command-line argument to the first instance
-if (process.platform === 'win32') {
-  const urlArg = process.argv.find((arg) => typeof arg === 'string' && arg.startsWith('jobtracker://'));
-  if (urlArg) {
-    pendingDeepLink = urlArg;
+    // Windows deep linking passes the URL as an argument
+    if (process.platform === 'win32') {
+      const urlArg = commandLine.find((arg) => typeof arg === 'string' && arg.startsWith('jobtracker://'));
+      if (urlArg) {
+        handleDeepLink(urlArg);
+      }
+    }
+  });
+
+  // Register custom protocol (after we know we have the lock)
+  if (process.defaultApp) {
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient('jobtracker', process.execPath, [path.resolve(process.argv[1])]);
+    }
+  } else {
+    app.setAsDefaultProtocolClient('jobtracker');
+  }
+
+  // On Windows, the protocol URL may be passed as a command-line argument to the FIRST instance
+  if (process.platform === 'win32') {
+    const urlArg = process.argv.find((arg) => typeof arg === 'string' && arg.startsWith('jobtracker://'));
+    if (urlArg) {
+      pendingDeepLink = urlArg;
+    }
   }
 }
-
-// On macOS, handle jobtracker:// links via open-url
-app.on('open-url', (event, url) => {
-  event.preventDefault();
-  handleDeepLink(url);
-});
 
 app.whenReady().then(() => {
   // Remove the menu bar (File, Edit, View, Window, Help)

@@ -13,7 +13,7 @@ export class Database {
     // Ensure directory exists
     const dir = path.dirname(dbPath);
     fs.ensureDirSync(dir);
-    
+
     this.db = new sqlite3.Database(dbPath, (err) => {
       if (err) {
         console.error('Error opening database:', err);
@@ -24,7 +24,7 @@ export class Database {
   // Derive encryption key from machine-specific info
   private getEncryptionKey(): Buffer {
     if (this.encryptionKey) return this.encryptionKey;
-    
+
     // Use machine-specific info to derive a key (hostname, user, platform)
     const machineInfo = `${os.hostname()}-${os.userInfo().username}-${os.platform()}`;
     const salt = 'job-tracker-v2.0.0-salt'; // Version-specific salt
@@ -39,12 +39,12 @@ export class Database {
       const key = this.getEncryptionKey();
       const iv = crypto.randomBytes(16);
       const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-      
+
       let encrypted = cipher.update(text, 'utf8', 'hex');
       encrypted += cipher.final('hex');
-      
+
       const authTag = cipher.getAuthTag();
-      
+
       // Return: iv:authTag:encrypted (all hex)
       return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
     } catch (error) {
@@ -56,31 +56,31 @@ export class Database {
   // Decrypt sensitive data
   private decrypt(encryptedText: string): string {
     if (!encryptedText) return encryptedText;
-    
+
     // Check if it's already encrypted (has the format iv:authTag:encrypted)
     if (!encryptedText.includes(':')) {
       // Not encrypted (legacy data), return as-is
       return encryptedText;
     }
-    
+
     try {
       const parts = encryptedText.split(':');
       if (parts.length !== 3) {
         // Invalid format, return as-is (might be legacy plaintext)
         return encryptedText;
       }
-      
+
       const [ivHex, authTagHex, encrypted] = parts;
       const key = this.getEncryptionKey();
       const iv = Buffer.from(ivHex, 'hex');
       const authTag = Buffer.from(authTagHex, 'hex');
-      
+
       const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
       decipher.setAuthTag(authTag);
-      
+
       let decrypted = decipher.update(encrypted, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
-      
+
       return decrypted;
     } catch (error) {
       console.error('Decryption error:', error);
@@ -92,7 +92,7 @@ export class Database {
   // List of settings keys that should be encrypted
   private readonly ENCRYPTED_KEYS = [
     'smtp_host',
-    'smtp_user', 
+    'smtp_user',
     'smtp_pass',
     'gmail_client_secret'
   ];
@@ -149,7 +149,7 @@ export class Database {
         company_size TEXT
       )
     `);
-    
+
     // Add new columns if they don't exist (migration)
     await this.run(`ALTER TABLE companies ADD COLUMN logo_url TEXT`);
     await this.run(`ALTER TABLE companies ADD COLUMN employee_count INTEGER`);
@@ -194,7 +194,7 @@ export class Database {
         FOREIGN KEY (job_id) REFERENCES jobs(id)
       )
     `);
-    
+
     // Add new columns if they don't exist (migration)
     await this.run(`ALTER TABLE contacts ADD COLUMN linkedin_url TEXT`);
     await this.run(`ALTER TABLE contacts ADD COLUMN next_check_in DATETIME`);
@@ -238,6 +238,7 @@ export class Database {
     // Migrations for reminders channel flags
     await this.run(`ALTER TABLE reminders ADD COLUMN notify_desktop INTEGER DEFAULT 1`);
     await this.run(`ALTER TABLE reminders ADD COLUMN notify_email INTEGER DEFAULT 0`);
+    await this.run(`ALTER TABLE reminders ADD COLUMN contact_id INTEGER`);
 
     // Notifications (in-app hub + unread count). One row per reminder occurrence.
     await this.run(`
@@ -344,7 +345,7 @@ export class Database {
       'Space Software & Mission Operations',
       'Other Space-Related'
     ].join('|');
-    
+
     // If no industries exist, or if using old comma format (no pipe), reset to defaults
     if (!existingIndustries || !existingIndustries.value || !existingIndustries.value.includes('|')) {
       await this.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
@@ -360,7 +361,13 @@ export class Database {
       SELECT 
         c.*,
         COUNT(j.id) as job_count,
-        MAX(j.status) as latest_status
+        MAX(j.status) as latest_status,
+        (
+          SELECT MIN(r.due_at) FROM reminders r 
+          WHERE ((r.entity_type = 'company' AND r.entity_id = c.id) 
+            OR (r.entity_type = 'job' AND r.entity_id IN (SELECT id FROM jobs WHERE company_id = c.id))) 
+          AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
+        ) as nearest_reminder
       FROM companies c
       LEFT JOIN jobs j ON c.id = j.company_id
       GROUP BY c.id
@@ -374,7 +381,17 @@ export class Database {
   }
 
   async getCompany(id: number) {
-    const c = await this.get('SELECT * FROM companies WHERE id = ?', [id]);
+    const c = await this.get(`
+      SELECT 
+        c.*,
+        (
+          SELECT MIN(r.due_at) FROM reminders r 
+          WHERE ((r.entity_type = 'company' AND r.entity_id = c.id) 
+            OR (r.entity_type = 'job' AND r.entity_id IN (SELECT id FROM jobs WHERE company_id = c.id))) 
+          AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
+        ) as nearest_reminder
+      FROM companies c WHERE id = ?
+      `, [id]);
     if (!c) return c;
     return {
       ...c,
@@ -435,7 +452,11 @@ export class Database {
         c.name as company_name,
         c.website as company_website,
         c.logo_url as company_logo_url,
-        c.dark_logo_bg as company_dark_logo_bg
+        c.dark_logo_bg as company_dark_logo_bg,
+        (
+          SELECT MIN(r.due_at) FROM reminders r 
+          WHERE r.entity_type = 'job' AND r.entity_id = j.id AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
+        ) as nearest_reminder
       FROM jobs j
       LEFT JOIN companies c ON j.company_id = c.id
       ORDER BY j.created_at DESC
@@ -447,7 +468,15 @@ export class Database {
   }
 
   async getJob(id: number) {
-    const job = await this.get('SELECT * FROM jobs WHERE id = ?', [id]);
+    const job = await this.get(`
+      SELECT 
+        j.*,
+        (
+          SELECT MIN(r.due_at) FROM reminders r 
+          WHERE r.entity_type = 'job' AND r.entity_id = j.id AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
+        ) as nearest_reminder
+      FROM jobs j WHERE id = ?
+      `, [id]);
     if (job && job.company_id) {
       const company = await this.getCompany(job.company_id);
       return { ...job, company };
@@ -457,7 +486,7 @@ export class Database {
 
   async createJob(data: any) {
     let companyId = data.company_id || null;
-    
+
     // Auto-create company if company_name provided but no company_id
     if (data.company_name && !companyId) {
       try {
@@ -488,19 +517,19 @@ export class Database {
       ]
     );
 
-    const job = await this.get('SELECT * FROM jobs WHERE title = ? AND company_id = ? ORDER BY id DESC LIMIT 1', 
+    const job = await this.get('SELECT * FROM jobs WHERE title = ? AND company_id = ? ORDER BY id DESC LIMIT 1',
       [data.title, companyId]);
-    
+
     if (companyId) {
       await this.run('UPDATE companies SET last_interaction = CURRENT_TIMESTAMP WHERE id = ?', [companyId]);
     }
-    
+
     return job;
   }
 
   async updateJob(id: number, data: any) {
     let companyId = data.company_id;
-    
+
     // Handle company auto-creation on update
     if (data.company_name && !companyId) {
       try {
@@ -572,14 +601,14 @@ export class Database {
     // Get contacts directly linked to job, plus company-level contacts (not job-specific)
     const job = await this.getJob(jobId);
     const jobContacts = await this.all('SELECT * FROM contacts WHERE job_id = ?', [jobId]);
-    
+
     if (job?.company_id) {
       // Get company-level contacts (where company_id is set but job_id is NULL)
-      const companyContacts = await this.all('SELECT * FROM contacts WHERE company_id = ? AND job_id IS NULL', 
+      const companyContacts = await this.all('SELECT * FROM contacts WHERE company_id = ? AND job_id IS NULL',
         [job.company_id]);
       return [...jobContacts, ...companyContacts];
     }
-    
+
     return jobContacts;
   }
 
@@ -601,7 +630,7 @@ export class Database {
     );
 
     const contact = await this.get('SELECT * FROM contacts WHERE name = ? ORDER BY id DESC LIMIT 1', [data.name]);
-    
+
     // If contact is added to a job, also add it to the company (but not to other jobs)
     if (data.job_id && !data.company_id) {
       const job = await this.getJob(data.job_id);
@@ -613,12 +642,12 @@ export class Database {
     } else if (data.company_id) {
       await this.run('UPDATE companies SET last_interaction = CURRENT_TIMESTAMP WHERE id = ?', [data.company_id]);
     }
-    
+
     const finalContact = await this.get('SELECT * FROM contacts WHERE id = ?', [contact.id]);
     await this.syncContactReminder(finalContact);
     return finalContact;
   }
-  
+
   async updateContact(id: number, data: any) {
     await this.run(
       `UPDATE contacts SET name = ?, company_id = ?, job_id = ?, role = ?, email = ?, phone = ?, notes = ?, linkedin_url = ?, next_check_in = ?
@@ -640,7 +669,7 @@ export class Database {
     await this.syncContactReminder(updated);
     return updated;
   }
-  
+
   async getContact(id: number) {
     return await this.get(
       `
@@ -656,7 +685,7 @@ export class Database {
       [id]
     );
   }
-  
+
   async getContactInteractions(contactId: number) {
     return await this.all(
       `
@@ -748,9 +777,9 @@ export class Database {
     if (data.follow_up_at) {
       const linkPath =
         data.job_id ? `/job/${data.job_id}` :
-        data.contact_id ? `/contacts/${data.contact_id}` :
-        data.company_id ? `/company/${data.company_id}` :
-        '/';
+          data.contact_id ? `/contacts/${data.contact_id}` :
+            data.company_id ? `/company/${data.company_id}` :
+              '/';
 
       const msg =
         (typeof data.follow_up_message === 'string' && data.follow_up_message.trim())
@@ -768,7 +797,7 @@ export class Database {
         notify_email: data.notify_email !== undefined ? Boolean(data.notify_email) : false
       });
     }
-    
+
     // Update last_interaction timestamps
     if (data.company_id) {
       await this.run('UPDATE companies SET last_interaction = CURRENT_TIMESTAMP WHERE id = ?', [data.company_id]);
@@ -776,7 +805,7 @@ export class Database {
     if (data.contact_id) {
       await this.run('UPDATE contacts SET last_interaction = CURRENT_TIMESTAMP WHERE id = ?', [data.contact_id]);
     }
-    
+
     return interaction;
   }
 
@@ -790,12 +819,13 @@ export class Database {
     link_path?: string | null;
     notify_desktop?: boolean;
     notify_email?: boolean;
+    contact_id?: number;
   }) {
     await this.run(
-      `INSERT OR REPLACE INTO reminders (id, entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, sent_at, updated_at)
+      `INSERT OR REPLACE INTO reminders (id, entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, contact_id, sent_at, updated_at)
        VALUES (
          (SELECT id FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ?),
-         ?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP
        )`,
       [
         rem.entity_type, rem.entity_id, rem.source,
@@ -806,7 +836,8 @@ export class Database {
         rem.message,
         rem.link_path || null,
         rem.notify_desktop === undefined ? 1 : rem.notify_desktop ? 1 : 0,
-        rem.notify_email === undefined ? 0 : rem.notify_email ? 1 : 0
+        rem.notify_email === undefined ? 0 : rem.notify_email ? 1 : 0,
+        rem.contact_id || null
       ]
     );
   }
@@ -867,12 +898,23 @@ export class Database {
       message,
       link_path: `/job/${jobId}`,
       notify_desktop: opts?.notify_desktop ?? true,
-      notify_email: opts?.notify_email ?? false
+      notify_email: opts?.notify_email ?? false,
+      contact_id: opts?.contact_id
     });
-    
+
     // update the contact's interaction if a contact_id is provided? Actually, no need.
     // just return the created reminder.
     return await this.get('SELECT * FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ?', ['job', jobId, 'follow_up']);
+  }
+
+  async getJobReminders(jobId: number) {
+    return await this.all(
+      `SELECT r.*, c.name as contact_name
+       FROM reminders r
+       LEFT JOIN contacts c ON r.contact_id = c.id
+       WHERE r.entity_type = 'job' AND r.entity_id = ? AND r.sent_at IS NULL ORDER BY r.due_at ASC;`,
+      [jobId]
+    );
   }
 
   async getDueReminders(nowIso: string) {
@@ -933,13 +975,14 @@ export class Database {
 
   async listNotifications(limit = 50, offset = 0) {
     return await this.all(
-      `SELECT *
-       FROM notifications
-       WHERE dismissed_at IS NULL
+      `SELECT n.*, r.contact_id
+       FROM notifications n
+       LEFT JOIN reminders r ON n.reminder_id = r.id
+       WHERE n.dismissed_at IS NULL
        ORDER BY
-         CASE WHEN read_at IS NULL THEN 0 ELSE 1 END,
-         datetime(created_at) DESC,
-         id DESC
+         CASE WHEN n.read_at IS NULL THEN 0 ELSE 1 END,
+         datetime(n.created_at) DESC,
+         n.id DESC
        LIMIT ? OFFSET ?`,
       [limit, offset]
     );
@@ -959,13 +1002,14 @@ export class Database {
     const col = channel === 'desktop' ? 'delivered_desktop_at' : 'delivered_email_at';
     const flag = channel === 'desktop' ? 'notify_desktop' : 'notify_email';
     return await this.all(
-      `SELECT *
-       FROM notifications
-       WHERE dismissed_at IS NULL
-         AND due_at <= ?
-         AND ${flag} = 1
-         AND ${col} IS NULL
-       ORDER BY due_at ASC
+      `SELECT n.*, r.contact_id
+       FROM notifications n
+       LEFT JOIN reminders r ON n.reminder_id = r.id
+       WHERE n.dismissed_at IS NULL
+         AND n.due_at <= ?
+         AND n.${flag} = 1
+         AND n.${col} IS NULL
+       ORDER BY n.due_at ASC
        LIMIT ?`,
       [nowIso, limit]
     );
@@ -1058,7 +1102,7 @@ export class Database {
     const interactions = await this.all('SELECT * FROM interactions');
     const documents = await this.all('SELECT * FROM documents');
     const settings = await this.getSettings();
-    
+
     return {
       companies,
       jobs,

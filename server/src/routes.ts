@@ -286,6 +286,17 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
     }
   });
 
+  // Job reminders
+  app.get('/api/jobs/:id/reminders', async (req: Request, res: Response) => {
+    try {
+      const jobId = parseInt(req.params.id);
+      const reminders = await db.getJobReminders(jobId);
+      res.json(reminders);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Job follow-up reminder
   app.post('/api/jobs/:id/reminder', async (req: Request, res: Response) => {
     try {

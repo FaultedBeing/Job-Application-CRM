@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api';
-import { ArrowLeft, Edit, Plus, Upload, Trash2, ExternalLink, Pencil, Check, X } from 'lucide-react';
+import { ArrowLeft, Edit, Plus, Upload, Trash2, ExternalLink, Pencil, Check, X, Bell } from 'lucide-react';
 import USMap from './USMap';
 
 interface Job {
@@ -116,6 +116,22 @@ interface Document {
   created_at: string;
 }
 
+interface Reminder {
+  id: number;
+  entity_type: string;
+  entity_id: number;
+  source: string;
+  due_at: string;
+  message: string;
+  link_path?: string;
+  notify_desktop: number;
+  notify_email: number;
+  contact_id?: number;
+  contact_name?: string;
+  sent_at?: string;
+  created_at: string;
+}
+
 export default function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -123,10 +139,12 @@ export default function JobDetail() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
   const [showAddContact, setShowAddContact] = useState(false);
   const [showAddInteraction, setShowAddInteraction] = useState(false);
+  const [showAddReminder, setShowAddReminder] = useState(false);
   const [jobNotes, setJobNotes] = useState('');
   const [editingDocId, setEditingDocId] = useState<number | null>(null);
   const [editDocName, setEditDocName] = useState('');
@@ -142,10 +160,11 @@ export default function JobDetail() {
 
   async function loadData() {
     try {
-      const [jobRes, contactsRes, documentsRes] = await Promise.all([
+      const [jobRes, contactsRes, documentsRes, remindersRes] = await Promise.all([
         api.get(`/jobs/${id}`),
         api.get(`/jobs/${id}/contacts`),
-        api.get(`/jobs/${id}/documents`)
+        api.get(`/jobs/${id}/documents`),
+        api.get(`/jobs/${id}/reminders`)
       ]);
 
       setJob(jobRes.data);
@@ -156,6 +175,7 @@ export default function JobDetail() {
       const filteredInteractions = allInteractions.data.filter((i: any) => i.job_id === parseInt(id!));
       setInteractions(filteredInteractions);
       setDocuments(documentsRes.data);
+      setReminders(remindersRes.data);
     } catch (error) {
       console.error('Error loading job:', error);
     }
@@ -212,6 +232,17 @@ export default function JobDetail() {
       loadData();
     } catch (error) {
       console.error('Error adding interaction:', error);
+    }
+  }
+
+  async function handleAddReminder(data: any) {
+    try {
+      await api.post(`/jobs/${id}/reminder`, data);
+      setShowAddReminder(false);
+      loadData();
+    } catch (error) {
+      console.error('Error adding reminder:', error);
+      alert('Error adding reminder: ' + (error as any).message);
     }
   }
 
@@ -392,42 +423,42 @@ export default function JobDetail() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
-                <button
-                  onClick={() => setEditing(true)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.75rem 1.5rem',
-                    backgroundColor: '#1a1d24',
-                    border: '1px solid #2d3139',
-                    borderRadius: '6px',
-                    color: '#e5e7eb',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <Edit size={20} />
-                  Edit
-                </button>
-                <button
-                  onClick={handleDeleteJob}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.75rem 1.5rem',
-                    backgroundColor: 'transparent',
-                    border: '1px solid #4b5563',
-                    borderRadius: '6px',
-                    color: '#f87171',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <Trash2 size={18} />
-                  Delete
-                </button>
-              </div>
+              <button
+                onClick={() => setEditing(true)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.75rem 1.5rem',
+                  backgroundColor: '#1a1d24',
+                  border: '1px solid #2d3139',
+                  borderRadius: '6px',
+                  color: '#e5e7eb',
+                  cursor: 'pointer'
+                }}
+              >
+                <Edit size={20} />
+                Edit
+              </button>
+              <button
+                onClick={handleDeleteJob}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.75rem 1.5rem',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #4b5563',
+                  borderRadius: '6px',
+                  color: '#f87171',
+                  cursor: 'pointer'
+                }}
+              >
+                <Trash2 size={18} />
+                Delete
+              </button>
             </div>
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem' }}>
             <div>
@@ -531,24 +562,81 @@ export default function JobDetail() {
               <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                   <h2 style={{ fontSize: '1.25rem', color: '#e5e7eb' }}>Activity Log</h2>
-                  <button
-                    onClick={() => setShowAddInteraction(true)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      padding: '0.5rem 1rem',
-                      backgroundColor: '#fbbf24',
-                      border: 'none',
-                      borderRadius: '6px',
-                      color: '#0f1115',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <Plus size={16} />
-                    Add
-                  </button>
+                  <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <button
+                      onClick={() => setShowAddReminder(true)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.5rem 1rem',
+                        backgroundColor: 'transparent',
+                        border: '1px solid #fbbf24',
+                        borderRadius: '6px',
+                        color: '#fbbf24',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Plus size={16} />
+                      Add Reminder
+                    </button>
+                    <button
+                      onClick={() => setShowAddInteraction(true)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.5rem 1rem',
+                        backgroundColor: '#fbbf24',
+                        border: 'none',
+                        borderRadius: '6px',
+                        color: '#0f1115',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Plus size={16} />
+                      Add Activity
+                    </button>
+                  </div>
                 </div>
+                {reminders.length > 0 && (
+                  <div style={{ marginBottom: '1rem' }}>
+                    {reminders.map((reminder) => (
+                      <div
+                        key={reminder.id}
+                        style={{
+                          padding: '1rem',
+                          marginBottom: '0.5rem',
+                          backgroundColor: '#1a1d24',
+                          borderRadius: '6px',
+                          border: '1px solid #fbbf24',
+                          borderLeft: '4px solid #fbbf24',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: '0.75rem'
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem', gap: '0.75rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontWeight: 'bold' }}>
+                              <Bell size={16} />
+                              Upcoming Reminder
+                            </div>
+                            <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#fbbf24' }}>
+                              Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                            </div>
+                          </div>
+                          {reminder.contact_name && (
+                            <p style={{ color: '#9ca3af', fontSize: '0.85rem', margin: '0.5rem 0 0 0' }}>
+                              <strong>With:</strong> {reminder.contact_name}
+                            </p>
+                          )}
+                          <p style={{ color: '#e5e7eb', marginTop: '0.5rem' }}>{reminder.message}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {interactions.length === 0 ? (
                   <p style={{ color: '#9ca3af' }}>No interactions yet.</p>
                 ) : (
@@ -568,24 +656,24 @@ export default function JobDetail() {
                         }}
                       >
                         <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            marginBottom: '0.35rem',
-                            gap: '0.75rem'
-                          }}
-                        >
-                          <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>{interaction.type}</span>
-                          <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#9ca3af' }}>
-                            <div>Action: {new Date(interaction.date).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</div>
-                            {interaction.follow_up_at && (
-                              <div style={{ color: '#fbbf24' }}>
-                                Reminder: {new Date(interaction.follow_up_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
-                              </div>
-                            )}
+                          <div
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              marginBottom: '0.35rem',
+                              gap: '0.75rem'
+                            }}
+                          >
+                            <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>{interaction.type}</span>
+                            <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#9ca3af' }}>
+                              <div>Action: {new Date(interaction.date).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</div>
+                              {interaction.follow_up_at && (
+                                <div style={{ color: '#fbbf24' }}>
+                                  Reminder: {new Date(interaction.follow_up_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
                           {interaction.contact_name && (
                             <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
                               With: {interaction.contact_name}
@@ -810,6 +898,15 @@ export default function JobDetail() {
           contacts={contacts}
           onClose={() => setShowAddInteraction(false)}
           onSave={handleAddInteraction}
+        />
+      )}
+
+      {showAddReminder && (
+        <AddReminderModal
+          jobId={parseInt(id!)}
+          contacts={contacts}
+          onClose={() => setShowAddReminder(false)}
+          onSave={handleAddReminder}
         />
       )}
       {/* Delete activity confirmation */}
@@ -1305,6 +1402,100 @@ function AddInteractionModal({ jobId: _jobId, contacts, onClose, onSave }: { job
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
             <button type="button" onClick={onClose} style={{ padding: '0.75rem 1.5rem', backgroundColor: 'transparent', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', cursor: 'pointer' }}>Cancel</button>
             <button type="submit" style={{ padding: '0.75rem 1.5rem', backgroundColor: '#fbbf24', border: 'none', borderRadius: '6px', color: '#0f1115', fontWeight: 'bold', cursor: 'pointer' }}>Add</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AddReminderModal({ jobId: _jobId, contacts, onClose, onSave }: { jobId: number; contacts: Contact[]; onClose: () => void; onSave: (data: any) => void }) {
+  const [followUpAt, setFollowUpAt] = useState('');
+  const [followUpMessage, setFollowUpMessage] = useState('');
+  const [contactId, setContactId] = useState('');
+  const [notifyDesktop, setNotifyDesktop] = useState(true);
+  const [notifyEmail, setNotifyEmail] = useState(false);
+  const [followUpTimeZone, setFollowUpTimeZone] = useState<string>(getDefaultTimeZone());
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!followUpAt) return;
+    const dueIso = toUtcIsoFromLocal(followUpAt, followUpTimeZone) || new Date(followUpAt).toISOString();
+    onSave({
+      due_at: dueIso,
+      message: followUpMessage,
+      contact_id: contactId ? parseInt(contactId) : null,
+      notify_desktop: notifyDesktop,
+      notify_email: notifyEmail
+    });
+  }
+
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
+      <div style={{ backgroundColor: '#1a1d24', padding: '2rem', borderRadius: '8px', width: '90%', maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ fontSize: '1.5rem', marginBottom: '1.5rem', color: '#fbbf24' }}>Add Reminder</h2>
+        <form onSubmit={handleSubmit}>
+
+          <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1.5rem' }}>
+            <label style={{ color: '#e5e7eb', fontSize: '0.9rem' }}>When</label>
+            <input
+              type="datetime-local"
+              required
+              value={followUpAt}
+              onChange={(e) => setFollowUpAt(e.target.value)}
+              className="dark-datetime"
+              style={{ width: '100%', padding: '0.75rem' }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', fontSize: '0.8rem' }}>
+              <span>Time zone:</span>
+              <select
+                value={followUpTimeZone}
+                onChange={(e) => setFollowUpTimeZone(e.target.value)}
+                style={{
+                  padding: '0.25rem 0.5rem',
+                  backgroundColor: '#0f1115',
+                  border: '1px solid #2d3139',
+                  borderRadius: '4px',
+                  color: '#e5e7eb',
+                  fontSize: '0.8rem'
+                }}
+              >
+                {COMMON_TIMEZONES.map((tz) => (
+                  <option key={tz.id} value={tz.id}>{tz.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <label style={{ color: '#e5e7eb', fontSize: '0.9rem', marginTop: '0.5rem' }}>Contact (Optional)</label>
+            <select value={contactId} onChange={(e) => setContactId(e.target.value)} style={{ width: '100%', padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}>
+              <option value="">No contact</option>
+              {contacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+
+            <label style={{ color: '#e5e7eb', fontSize: '0.9rem', marginTop: '0.5rem' }}>Message / Note</label>
+            <input
+              type="text"
+              value={followUpMessage}
+              onChange={(e) => setFollowUpMessage(e.target.value)}
+              placeholder="e.g. Follow up with hiring manager"
+              style={{ width: '100%', padding: '0.75rem', backgroundColor: '#1a1d24', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
+            />
+
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer' }}>
+                <input type="checkbox" checked={notifyDesktop} onChange={(e) => setNotifyDesktop(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
+                Desktop notification
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer' }}>
+                <input type="checkbox" checked={notifyEmail} onChange={(e) => setNotifyEmail(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
+                Email me (requires email setup)
+              </label>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+            <button type="button" onClick={onClose} style={{ padding: '0.75rem 1.5rem', backgroundColor: 'transparent', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', cursor: 'pointer' }}>Cancel</button>
+            <button type="submit" style={{ padding: '0.75rem 1.5rem', backgroundColor: '#fbbf24', border: 'none', borderRadius: '6px', color: '#0f1115', fontWeight: 'bold', cursor: 'pointer' }}>Add Reminder</button>
           </div>
         </form>
       </div>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
-import { Search } from 'lucide-react';
+import { Search, Bell } from 'lucide-react';
 
 interface Company {
   id: number;
@@ -16,6 +16,7 @@ interface Company {
   last_interaction?: string;
   dark_logo_bg?: boolean;
   location?: string;
+  nearest_reminder?: string;
 }
 
 export default function Companies() {
@@ -194,9 +195,17 @@ export default function Companies() {
                   />
                 </div>
               )}
-              <h3 style={{ fontSize: '1.25rem', color: '#e5e7eb', margin: 0 }}>
-                {company.name}
-              </h3>
+              <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <h3 style={{ fontSize: '1.25rem', color: '#e5e7eb', margin: 0 }}>
+                  {company.name}
+                </h3>
+                {company.nearest_reminder && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', backgroundColor: '#fbbf2420', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem', flexShrink: 0 }} title="Upcoming Reminder">
+                    <Bell size={12} />
+                    {new Date(company.nearest_reminder).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </div>
+                )}
+              </div>
             </div>
             {company.industry && (
               <p style={{ color: '#9ca3af', marginBottom: '0.5rem' }}>{company.industry}</p>
