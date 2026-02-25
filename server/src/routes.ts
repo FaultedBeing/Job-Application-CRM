@@ -226,6 +226,33 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
     }
   });
 
+  app.get('/api/contacts/:id/reminders', async (req: Request, res: Response) => {
+    try {
+      const reminders = await db.getContactReminders(parseInt(req.params.id));
+      res.json(reminders);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/contacts/:id/reminders', async (req: Request, res: Response) => {
+    try {
+      const { due_at, message, notify_desktop, notify_email } = req.body;
+      if (!due_at || !message) {
+        return res.status(400).json({ error: 'due_at and message are required' });
+      }
+      const reminder = await db.createContactReminder(
+        parseInt(req.params.id),
+        due_at,
+        message,
+        { notify_desktop, notify_email }
+      );
+      res.status(201).json(reminder);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Interactions
   app.get('/api/interactions', async (req: Request, res: Response) => {
     try {

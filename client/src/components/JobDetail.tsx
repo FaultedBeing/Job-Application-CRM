@@ -132,6 +132,76 @@ interface Reminder {
   created_at: string;
 }
 
+function ReminderCard({ reminder }: { reminder: Reminder }) {
+  const [expanded, setExpanded] = useState(false);
+  const isPast = !!reminder.sent_at;
+
+  if (isPast && !expanded) {
+    return (
+      <div
+        onClick={() => setExpanded(true)}
+        style={{
+          padding: '0.5rem 1rem',
+          marginBottom: '0.5rem',
+          backgroundColor: '#0f1115',
+          borderRadius: '6px',
+          borderLeft: '3px solid #fbbf24',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          cursor: 'pointer'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontWeight: 'bold', fontSize: '0.9rem' }}>
+          <Bell size={14} />
+          Past Reminder
+        </div>
+        <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#fbbf24' }}>
+          Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={isPast ? () => setExpanded(false) : undefined}
+      style={{
+        padding: '1rem',
+        marginBottom: '0.5rem',
+        backgroundColor: isPast ? '#0f1115' : '#1a1d24',
+        borderRadius: '6px',
+        border: isPast ? '1px solid #2d3139' : '1px solid #fbbf24',
+        borderLeft: isPast ? '3px solid #fbbf24' : '4px solid #fbbf24',
+        display: 'flex',
+        justifyContent: 'space-between',
+        gap: '0.75rem',
+        cursor: isPast ? 'pointer' : 'default'
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontWeight: 'bold' }}>
+            <Bell size={16} />
+            {isPast ? 'Past Reminder' : 'Upcoming Reminder'}
+          </div>
+          <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#9ca3af' }}>
+            <div style={{ color: isPast ? '#9ca3af' : '#fbbf24' }}>
+              Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+            </div>
+          </div>
+        </div>
+        {reminder.contact_name && (
+          <div style={{ color: '#9ca3af', fontSize: '0.75rem', marginTop: '0.1rem', marginBottom: '0.5rem' }}>
+            <strong>With:</strong> {reminder.contact_name}
+          </div>
+        )}
+        <p style={{ color: '#e5e7eb', marginTop: '0.25rem' }}>{reminder.message}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -602,38 +672,7 @@ export default function JobDetail() {
                 {reminders.length > 0 && (
                   <div style={{ marginBottom: '1rem' }}>
                     {reminders.map((reminder) => (
-                      <div
-                        key={reminder.id}
-                        style={{
-                          padding: '1rem',
-                          marginBottom: '0.5rem',
-                          backgroundColor: '#1a1d24',
-                          borderRadius: '6px',
-                          border: '1px solid #fbbf24',
-                          borderLeft: '4px solid #fbbf24',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          gap: '0.75rem'
-                        }}
-                      >
-                        <div style={{ flex: 1 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem', gap: '0.75rem' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontWeight: 'bold' }}>
-                              <Bell size={16} />
-                              Upcoming Reminder
-                            </div>
-                            <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#fbbf24' }}>
-                              Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
-                            </div>
-                          </div>
-                          {reminder.contact_name && (
-                            <p style={{ color: '#9ca3af', fontSize: '0.85rem', margin: '0.5rem 0 0 0' }}>
-                              <strong>With:</strong> {reminder.contact_name}
-                            </p>
-                          )}
-                          <p style={{ color: '#e5e7eb', marginTop: '0.5rem' }}>{reminder.message}</p>
-                        </div>
-                      </div>
+                      <ReminderCard key={reminder.id} reminder={reminder} />
                     ))}
                   </div>
                 )}

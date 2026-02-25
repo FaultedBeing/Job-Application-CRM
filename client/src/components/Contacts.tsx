@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
-import { ArrowLeft, Plus, Edit, Calendar, Trash2, Search } from 'lucide-react';
+import { ArrowLeft, Plus, Edit, Calendar, Trash2, Search, Bell } from 'lucide-react';
 
 interface Contact {
   id: number;
@@ -16,11 +16,28 @@ interface Contact {
   notes?: string;
   next_check_in?: string;
   last_interaction?: string;
+  nearest_reminder?: string;
 }
 
 interface CompanyOption {
   id: number;
   name: string;
+}
+
+interface Reminder {
+  id: number;
+  entity_type: string;
+  entity_id: number;
+  source: string;
+  due_at: string;
+  message: string;
+  link_path?: string;
+  notify_desktop: number;
+  notify_email: number;
+  contact_id?: number | null;
+  contact_name?: string;
+  sent_at?: string;
+  created_at: string;
 }
 
 interface Interaction {
@@ -103,8 +120,10 @@ export default function Contacts() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
   const [editing, setEditing] = useState(false);
   const [showAddInteraction, setShowAddInteraction] = useState(false);
+  const [showAddReminder, setShowAddReminder] = useState(false);
   const [notesDraft, setNotesDraft] = useState('');
   const [sortBy, setSortBy] = useState<'recent' | 'name' | 'company' | 'no_company'>('recent');
   const [showAddContact, setShowAddContact] = useState(false);
@@ -139,13 +158,15 @@ export default function Contacts() {
 
   async function loadContactDetail() {
     try {
-      const [contactRes, interactionsRes] = await Promise.all([
+      const [contactRes, interactionsRes, remindersRes] = await Promise.all([
         api.get(`/contacts/${id}`),
-        api.get(`/contacts/${id}/interactions`)
+        api.get(`/contacts/${id}/interactions`),
+        api.get(`/contacts/${id}/reminders`)
       ]);
       setSelectedContact(contactRes.data);
       setNotesDraft(contactRes.data.notes || '');
       setInteractions(interactionsRes.data);
+      setReminders(remindersRes.data);
     } catch (error) {
       console.error('Error loading contact:', error);
     }
@@ -173,6 +194,17 @@ export default function Contacts() {
       loadContactDetail();
     } catch (error) {
       console.error('Error adding interaction:', error);
+    }
+  }
+
+  async function handleAddReminder(data: any) {
+    try {
+      await api.post(`/contacts/${id}/reminders`, data);
+      setShowAddReminder(false);
+      loadContactDetail();
+    } catch (error) {
+      console.error('Error adding reminder:', error);
+      alert('Failed to add reminder. Please try again.');
     }
   }
 
@@ -376,24 +408,50 @@ export default function Contacts() {
                 <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                     <h2 style={{ fontSize: '1.25rem', color: '#e5e7eb' }}>Activity Log</h2>
-                    <button
-                      onClick={() => setShowAddInteraction(true)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        padding: '0.5rem 1rem',
-                        backgroundColor: '#fbbf24',
-                        border: 'none',
-                        borderRadius: '6px',
-                        color: '#0f1115',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <Plus size={16} />
-                      Add
-                    </button>
+                    <div style={{ display: 'flex', gap: '1rem' }}>
+                      <button
+                        onClick={() => setShowAddReminder(true)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          padding: '0.5rem 1rem',
+                          backgroundColor: '#fbbf24',
+                          border: 'none',
+                          borderRadius: '6px',
+                          color: '#0f1115',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <Bell size={16} />
+                        Add Reminder
+                      </button>
+                      <button
+                        onClick={() => setShowAddInteraction(true)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          padding: '0.5rem 1rem',
+                          backgroundColor: '#1a1d24',
+                          border: '1px solid #2d3139',
+                          borderRadius: '6px',
+                          color: '#e5e7eb',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <Plus size={16} />
+                        Log Activity
+                      </button>
+                    </div>
                   </div>
+                  {reminders.length > 0 && (
+                    <div style={{ marginBottom: '1rem' }}>
+                      {reminders.map((reminder) => (
+                        <ReminderCard key={reminder.id} reminder={reminder} />
+                      ))}
+                    </div>
+                  )}
                   {interactions.length === 0 ? (
                     <p style={{ color: '#9ca3af' }}>No interactions yet.</p>
                   ) : (
@@ -486,6 +544,14 @@ export default function Contacts() {
             contactId={parseInt(id!)}
             onClose={() => setShowAddInteraction(false)}
             onSave={handleAddInteraction}
+          />
+        )}
+
+        {showAddReminder && selectedContact && (
+          <AddReminderModal
+            contactId={selectedContact.id}
+            onClose={() => setShowAddReminder(false)}
+            onSave={handleAddReminder}
           />
         )}
 
@@ -626,10 +692,10 @@ export default function Contacts() {
         const q = searchTerm.trim().toLowerCase();
         const filtered = q
           ? contacts.filter((c) =>
-              c.name.toLowerCase().includes(q) ||
-              (c.role || '').toLowerCase().includes(q) ||
-              (c.company_name || '').toLowerCase().includes(q)
-            )
+            c.name.toLowerCase().includes(q) ||
+            (c.role || '').toLowerCase().includes(q) ||
+            (c.company_name || '').toLowerCase().includes(q)
+          )
           : contacts;
 
         const sortedContacts = [...filtered].sort((a, b) => {
@@ -658,102 +724,108 @@ export default function Contacts() {
         return (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
             {sortedContacts.map((contact) => (
-          <div
-            key={contact.id}
-            onClick={() => navigate(`/contacts/${contact.id}`)}
-            style={{
-              padding: '1.5rem',
-              backgroundColor: '#1a1d24',
-              borderRadius: '8px',
-              border: '1px solid #2d3139',
-              cursor: 'pointer',
-              transition: 'transform 0.2s',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              gap: '0.75rem'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.borderColor = '#fbbf24';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.borderColor = '#2d3139';
-            }}
-          >
-            <div>
-              <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', color: '#e5e7eb' }}>
-                {contact.name}
-              </h3>
-              {contact.role && (
-                <p style={{ color: '#9ca3af', marginBottom: '0.5rem' }}>{contact.role}</p>
-              )}
-              {contact.company_name && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                  {contact.company_logo_url && (
-                    <div
-                      style={{
-                        width: '24px',
-                        height: '24px',
-                        borderRadius: '4px',
-                        padding: '2px',
-                        backgroundColor: contact.company_dark_logo_bg ? '#e5e7eb' : '#0f1115',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        border: '1px solid #2d3139',
-                        flexShrink: 0
-                      }}
-                    >
-                      <img
-                        src={contact.company_logo_url}
-                        alt={`${contact.company_name} logo`}
-                        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
-                      />
+              <div
+                key={contact.id}
+                onClick={() => navigate(`/contacts/${contact.id}`)}
+                style={{
+                  padding: '1.5rem',
+                  backgroundColor: '#1a1d24',
+                  borderRadius: '8px',
+                  border: '1px solid #2d3139',
+                  cursor: 'pointer',
+                  transition: 'transform 0.2s',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-4px)';
+                  e.currentTarget.style.borderColor = '#fbbf24';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.borderColor = '#2d3139';
+                }}
+              >
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', color: '#e5e7eb' }}>
+                    {contact.name}
+                  </h3>
+                  {contact.role && (
+                    <p style={{ color: '#9ca3af', marginBottom: '0.5rem' }}>{contact.role}</p>
+                  )}
+                  {contact.company_name && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                      {contact.company_logo_url && (
+                        <div
+                          style={{
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '4px',
+                            padding: '2px',
+                            backgroundColor: contact.company_dark_logo_bg ? '#e5e7eb' : '#0f1115',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '1px solid #2d3139',
+                            flexShrink: 0
+                          }}
+                        >
+                          <img
+                            src={contact.company_logo_url}
+                            alt={`${contact.company_name} logo`}
+                            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        </div>
+                      )}
+                      <p style={{ color: '#9ca3af', fontSize: '0.875rem', margin: 0 }}>
+                        {contact.company_name}
+                      </p>
                     </div>
                   )}
-                  <p style={{ color: '#9ca3af', fontSize: '0.875rem', margin: 0 }}>
-                    {contact.company_name}
-                  </p>
+                  {contact.email && (
+                    <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
+                      {contact.email}
+                    </p>
+                  )}
+                  {contact.phone && (
+                    <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{contact.phone}</p>
+                  )}
+                  {contact.next_check_in && (
+                    <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontSize: '0.875rem' }}>
+                      <Calendar size={16} />
+                      Check-in: {new Date(contact.next_check_in).toLocaleDateString()}
+                    </div>
+                  )}
+                  {contact.nearest_reminder && (
+                    <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontSize: '0.875rem' }}>
+                      <Bell size={16} />
+                      Reminder: {new Date(contact.nearest_reminder).toLocaleDateString()}
+                    </div>
+                  )}
                 </div>
-              )}
-              {contact.email && (
-                <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
-                  {contact.email}
-                </p>
-              )}
-              {contact.phone && (
-                <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{contact.phone}</p>
-              )}
-              {contact.next_check_in && (
-                <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontSize: '0.875rem' }}>
-                  <Calendar size={16} />
-                  Check-in: {new Date(contact.next_check_in).toLocaleDateString()}
-                </div>
-              )}
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleDeleteContact(contact.id);
-              }}
-              style={{
-                alignSelf: 'flex-end',
-                padding: '0.25rem 0.5rem',
-                backgroundColor: 'transparent',
-                border: 'none',
-                color: '#ef4444',
-                cursor: 'pointer'
-              }}
-              title="Delete contact"
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteContact(contact.id);
+                  }}
+                  style={{
+                    alignSelf: 'flex-end',
+                    padding: '0.25rem 0.5rem',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    color: '#ef4444',
+                    cursor: 'pointer'
+                  }}
+                  title="Delete contact"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
             ))}
           </div>
         );
@@ -1189,6 +1261,152 @@ function AddContactModal({
             >
               Add
             </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ReminderCard({ reminder }: { reminder: Reminder }) {
+  const [expanded, setExpanded] = useState(false);
+  const isPast = !!reminder.sent_at;
+
+  if (isPast && !expanded) {
+    return (
+      <div
+        onClick={() => setExpanded(true)}
+        style={{
+          padding: '0.5rem 1rem',
+          marginBottom: '0.5rem',
+          backgroundColor: '#0f1115',
+          borderRadius: '6px',
+          borderLeft: '3px solid #fbbf24',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          cursor: 'pointer'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontWeight: 'bold', fontSize: '0.9rem' }}>
+          <Bell size={14} />
+          Past Reminder
+        </div>
+        <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#fbbf24' }}>
+          Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={isPast ? () => setExpanded(false) : undefined}
+      style={{
+        padding: '1rem',
+        marginBottom: '0.5rem',
+        backgroundColor: isPast ? '#0f1115' : '#1a1d24',
+        borderRadius: '6px',
+        border: isPast ? '1px solid #2d3139' : '1px solid #fbbf24',
+        borderLeft: isPast ? '3px solid #fbbf24' : '4px solid #fbbf24',
+        display: 'flex',
+        justifyContent: 'space-between',
+        gap: '0.75rem',
+        cursor: isPast ? 'pointer' : 'default'
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontWeight: 'bold' }}>
+            <Bell size={16} />
+            {isPast ? 'Past Reminder' : 'Upcoming Reminder'}
+          </div>
+          <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#9ca3af' }}>
+            <div style={{ color: isPast ? '#9ca3af' : '#fbbf24' }}>
+              Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+            </div>
+          </div>
+        </div>
+        <p style={{ color: '#e5e7eb', marginTop: '0.25rem' }}>{reminder.message}</p>
+      </div>
+    </div>
+  );
+}
+
+function AddReminderModal({ contactId, onClose, onSave }: { contactId: number; onClose: () => void; onSave: (data: any) => void }) {
+  const [followUpAt, setFollowUpAt] = useState('');
+  const [followUpMessage, setFollowUpMessage] = useState('');
+  const [notifyDesktop, setNotifyDesktop] = useState(true);
+  const [notifyEmail, setNotifyEmail] = useState(false);
+  const [followUpTimeZone, setFollowUpTimeZone] = useState<string>(getDefaultTimeZone());
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!followUpAt || !followUpMessage.trim()) {
+      alert('Please provide a date and message.');
+      return;
+    }
+    const dueIso = toUtcIsoFromLocal(followUpAt, followUpTimeZone) || new Date(followUpAt).toISOString();
+    onSave({
+      contact_id: contactId,
+      due_at: dueIso,
+      message: followUpMessage,
+      notify_desktop: notifyDesktop,
+      notify_email: notifyEmail
+    });
+  }
+
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
+      <div style={{ backgroundColor: '#1a1d24', padding: '2rem', borderRadius: '8px', width: '90%', maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ fontSize: '1.5rem', marginBottom: '1.5rem', color: '#fbbf24' }}>Add Reminder</h2>
+        <form onSubmit={handleSubmit}>
+          <div style={{ display: 'grid', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.25rem' }}>
+              <input
+                type="datetime-local"
+                required
+                value={followUpAt}
+                onChange={(e) => setFollowUpAt(e.target.value)}
+                className="dark-datetime"
+                style={{ flex: 1, padding: '0.75rem' }}
+              />
+              <select
+                value={followUpTimeZone}
+                onChange={(e) => setFollowUpTimeZone(e.target.value)}
+                style={{ padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
+              >
+                {COMMON_TIMEZONES.map((tz) => (
+                  <option key={tz.id} value={tz.id}>{tz.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <label style={{ color: '#e5e7eb', fontSize: '0.9rem', marginTop: '0.5rem' }}>Message / Note</label>
+            <input
+              type="text"
+              required
+              value={followUpMessage}
+              onChange={(e) => setFollowUpMessage(e.target.value)}
+              placeholder="e.g. Catch up over coffee"
+              style={{ width: '100%', padding: '0.75rem', backgroundColor: '#1a1d24', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
+            />
+
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer' }}>
+                <input type="checkbox" checked={notifyDesktop} onChange={(e) => setNotifyDesktop(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
+                Desktop notification
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer' }}>
+                <input type="checkbox" checked={notifyEmail} onChange={(e) => setNotifyEmail(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
+                Email me (requires email setup)
+              </label>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+            <button type="button" onClick={onClose} style={{ padding: '0.75rem 1.5rem', backgroundColor: 'transparent', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', cursor: 'pointer' }}>Cancel</button>
+            <button type="submit" style={{ padding: '0.75rem 1.5rem', backgroundColor: '#fbbf24', border: 'none', borderRadius: '6px', color: '#0f1115', fontWeight: 'bold', cursor: 'pointer' }}>Add Reminder</button>
           </div>
         </form>
       </div>

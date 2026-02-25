@@ -590,7 +590,12 @@ export class Database {
         c.*,
         co.name as company_name,
         co.logo_url as company_logo_url,
-        co.dark_logo_bg as company_dark_logo_bg
+        co.dark_logo_bg as company_dark_logo_bg,
+        (
+          SELECT MIN(r.due_at) FROM reminders r 
+          WHERE ((r.entity_type = 'contact' AND r.entity_id = c.id) OR (r.contact_id = c.id))
+          AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
+        ) as nearest_reminder
       FROM contacts c
       LEFT JOIN companies co ON c.company_id = co.id
       ORDER BY c.last_interaction DESC
@@ -912,9 +917,36 @@ export class Database {
       `SELECT r.*, c.name as contact_name
        FROM reminders r
        LEFT JOIN contacts c ON r.contact_id = c.id
-       WHERE r.entity_type = 'job' AND r.entity_id = ? AND r.sent_at IS NULL ORDER BY r.due_at ASC;`,
+       WHERE r.entity_type = 'job' AND r.entity_id = ? 
+       ORDER BY CASE WHEN r.sent_at IS NULL THEN 0 ELSE 1 END, r.due_at ASC;`,
       [jobId]
     );
+  }
+
+  async getContactReminders(contactId: number) {
+    return await this.all(
+      `SELECT r.*, c.name as contact_name
+       FROM reminders r
+       LEFT JOIN contacts c ON r.contact_id = c.id
+       WHERE (r.entity_type = 'contact' AND r.entity_id = ?) OR (r.contact_id = ?)
+       ORDER BY CASE WHEN r.sent_at IS NULL THEN 0 ELSE 1 END, r.due_at ASC;`,
+      [contactId, contactId]
+    );
+  }
+
+  async createContactReminder(contactId: number, dueAt: string, message: string, opts?: { notify_desktop?: boolean; notify_email?: boolean; contact_id?: number }) {
+    await this.upsertReminder({
+      entity_type: 'contact',
+      entity_id: contactId,
+      source: 'manual',
+      due_at: dueAt,
+      message,
+      link_path: `/contacts/${contactId}`,
+      notify_desktop: opts?.notify_desktop ?? true,
+      notify_email: opts?.notify_email ?? false,
+      contact_id: opts?.contact_id || contactId
+    });
+    return await this.get('SELECT * FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ?', ['contact', contactId, 'manual']);
   }
 
   async getDueReminders(nowIso: string) {

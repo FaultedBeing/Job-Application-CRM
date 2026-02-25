@@ -884,6 +884,10 @@ async function hydrateNotificationLabels(pending) {
       if (n.entity_type === 'interaction' && Number.isFinite(n.entity_id)) {
         interactionIds.add(n.entity_id);
       }
+
+      if (n.contact_id) {
+        contactIds.add(n.contact_id);
+      }
     }
 
     const contacts = {};
@@ -1022,18 +1026,13 @@ function buildSummaryEmailHtml(pending, baseUrl) {
               <div style="color:#9ca3af;font-size:12px;margin-bottom:4px;">${msg}</div>
               <div style="color:#6b7280;font-size:12px;">Due: ${due}</div>
               <div style="margin-top:8px;">
-                <!--[if mso]>
-                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(deepLink)}" style="height:36px;v-text-anchor:middle;width:110px;" arcsize="20%" stroke="f" fillcolor="#3b82f6">
-                    <w:anchorlock/>
-                    <center>
-                  <![endif]-->
-                  <a href="${escapeHtml(deepLink)}" style="background-color:#3b82f6;border-radius:6px;color:#ffffff;display:inline-block;font-family:sans-serif;font-size:13px;font-weight:bold;line-height:36px;text-align:center;text-decoration:none;width:110px;-webkit-text-size-adjust:none;">Open in app</a>
-                  <!--[if mso]>
-                    </center>
-                  </v:roundrect>
-                <![endif]-->
+                <div style="color:#6b7280;font-size:12px;margin-bottom:8px;">
+                  Open in app by clicking the link below:<br>
+                  <a href="${escapeHtml(deepLink)}" style="color:#3b82f6;text-decoration:underline;word-break:break-all;">${escapeHtml(deepLink)}</a>
+                </div>
                 <div style="color:#4b5563;font-size:11px;margin-top:4px;">
-                  If that doesn't work, open: <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
+                  If that doesn't work, open in your browser:<br>
+                  <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
                 </div>
               </div>
             </td>
@@ -1195,20 +1194,13 @@ async function deliverEmailNotifications(settings) {
             <div style="font-size:14px;color:#e5e7eb;font-weight:800;margin-bottom:6px;">${escapeHtml(who)}</div>
             <div style="color:#e5e7eb;line-height:1.4;margin-bottom:4px;">${escapeHtml(n.message || '')}</div>
             ${due ? `<div style="color:#6b7280;font-size:12px;margin-bottom:12px;">Due: ${escapeHtml(due)}</div>` : ''}
-            <div>
-              <!--[if mso]>
-                <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(deepLink)}" style="height:40px;v-text-anchor:middle;width:120px;" arcsize="20%" stroke="f" fillcolor="#3b82f6">
-                  <w:anchorlock/>
-                  <center>
-                <![endif]-->
-                <a href="${escapeHtml(deepLink)}" style="background-color:#3b82f6;border-radius:8px;color:#ffffff;display:inline-block;font-family:sans-serif;font-size:14px;font-weight:bold;line-height:40px;text-align:center;text-decoration:none;width:120px;-webkit-text-size-adjust:none;">Open in app</a>
-                <!--[if mso]>
-                  </center>
-                </v:roundrect>
-              <![endif]-->
+            <div style="color:#6b7280;font-size:12px;margin-bottom:8px;">
+              Open in app by clicking the link below:<br>
+              <a href="${escapeHtml(deepLink)}" style="color:#3b82f6;text-decoration:underline;word-break:break-all;">${escapeHtml(deepLink)}</a>
             </div>
             <div style="color:#4b5563;font-size:11px;margin-top:8px;">
-              If that doesn't work, open in your browser: <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
+              If that doesn't work, open in your browser:<br>
+              <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
             </div>
           </div>
         </div>

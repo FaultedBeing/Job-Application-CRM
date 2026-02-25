@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
-import { Briefcase, TrendingUp } from 'lucide-react';
+import { Briefcase, TrendingUp, Bell } from 'lucide-react';
 
 interface Job {
   id: number;
@@ -12,6 +12,7 @@ interface Job {
   status: string;
   excitement_score: number;
   fit_score: number;
+  nearest_reminder?: string;
 }
 
 interface Company {
@@ -20,6 +21,7 @@ interface Company {
   logo_url?: string;
   dark_logo_bg?: boolean;
   last_interaction: string;
+  nearest_reminder?: string;
 }
 
 interface Contact {
@@ -30,6 +32,7 @@ interface Contact {
   company_logo_url?: string;
   company_dark_logo_bg?: boolean;
   linkedin_url?: string;
+  nearest_reminder?: string;
 }
 
 interface Settings {
@@ -211,6 +214,12 @@ export default function Dashboard() {
                         )}
                         <p style={{ color: '#9ca3af', fontSize: '0.875rem', margin: 0 }}>{job.company_name}</p>
                       </div>
+                      {job.nearest_reminder && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', fontSize: '0.75rem', marginTop: '0.4rem' }}>
+                          <Bell size={12} />
+                          Reminder: {new Date(job.nearest_reminder).toLocaleDateString()}
+                        </div>
+                      )}
                     </div>
                     <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0, whiteSpace: 'nowrap' }}>
                       <span style={{ color: '#fbbf24' }}>★ {job.excitement_score}</span>
@@ -268,6 +277,12 @@ export default function Dashboard() {
                     )}
                     <span>{company.name}</span>
                   </div>
+                  {company.nearest_reminder && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                      <Bell size={12} />
+                      Reminder: {new Date(company.nearest_reminder).toLocaleDateString()}
+                    </div>
+                  )}
                 </Link>
               ))
             )}
@@ -331,6 +346,12 @@ export default function Dashboard() {
                   <p style={{ color: '#e5e7eb', fontSize: '0.9rem', margin: 0 }}>{contact.name}</p>
                   {contact.company_name && (
                     <p style={{ color: '#9ca3af', fontSize: '0.75rem', margin: 0 }}>{contact.company_name}</p>
+                  )}
+                  {contact.nearest_reminder && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', fontSize: '0.7rem', marginTop: '0.25rem' }}>
+                      <Bell size={10} />
+                      {new Date(contact.nearest_reminder).toLocaleDateString()}
+                    </div>
                   )}
                 </Link>
               ))}
