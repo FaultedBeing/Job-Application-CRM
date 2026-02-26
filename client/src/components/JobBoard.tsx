@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
-import { Plus, Search, Bell } from 'lucide-react';
+import { Plus, Search, Bell, Download, Upload } from 'lucide-react';
 import AlertDialog from './AlertDialog';
+import { debugLog } from '../utils/debugLogger';
 
 interface Job {
   id: number;
@@ -25,6 +26,8 @@ export default function JobBoard() {
   const [sortBy, setSortBy] = useState<'date' | 'excitement' | 'fit'>('date');
   const [showAddModal, setShowAddModal] = useState(false);
   const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
+  const [importing, setImporting] = useState(false);
+
 
   useEffect(() => {
     loadJobs();
@@ -79,6 +82,45 @@ export default function JobBoard() {
     }
   }
 
+  async function handleExportExcel() {
+    try {
+      const res = await api.get('/export/excel', { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `job-tracker-apps-export-${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      setAlertMsg({ title: 'Error', message: 'Error exporting to Excel' });
+    }
+  }
+
+  async function handleImportFile(file: File) {
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/import/jobs', formData);
+      const { imported, skipped, errors } = res.data;
+      let msg = `Imported ${imported} job${imported === 1 ? '' : 's'}.`;
+      if (skipped > 0) msg += `\n${skipped} skipped.`;
+      if (errors && errors.length > 0) msg += `\nErrors: ${errors.length}`;
+      setAlertMsg({ title: 'Import complete', message: msg });
+      loadJobs();
+    } catch (error: any) {
+      const serverMsg = error?.response?.data?.error || error?.message || 'Unknown error';
+      setAlertMsg({ title: 'Import failed', message: serverMsg });
+    } finally {
+      setImporting(false);
+      const input = document.getElementById('job-import-input') as HTMLInputElement;
+      if (input) input.value = '';
+    }
+  }
+
   const statusColors: Record<string, string> = {
     'Wishlist': '#9ca3af',
     'Applied': '#3b82f6',
@@ -91,24 +133,74 @@ export default function JobBoard() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <h1 style={{ fontSize: '2rem', color: '#fbbf24' }}>Job Applications</h1>
-        <button
-          onClick={() => setShowAddModal(true)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            padding: '0.75rem 1.5rem',
-            backgroundColor: '#fbbf24',
-            color: '#0f1115',
-            border: 'none',
-            borderRadius: '6px',
-            fontWeight: 'bold',
-            cursor: 'pointer'
-          }}
-        >
-          <Plus size={20} />
-          Add Job
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <input
+            id="job-import-input"
+            type="file"
+            accept=".xlsx,.xls"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleImportFile(file);
+            }}
+          />
+          <button
+            onClick={() => document.getElementById('job-import-input')?.click()}
+            disabled={importing}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem 1.5rem',
+              backgroundColor: 'transparent',
+              color: '#34d399',
+              border: '1px solid #34d399',
+              borderRadius: '6px',
+              fontWeight: 'bold',
+              cursor: importing ? 'not-allowed' : 'pointer',
+              opacity: importing ? 0.6 : 1
+            }}
+          >
+            <Upload size={16} />
+            {importing ? 'Importing…' : 'Import'}
+          </button>
+          <button
+            onClick={handleExportExcel}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem 1.5rem',
+              backgroundColor: 'transparent',
+              color: '#10b981',
+              border: '1px solid #10b981',
+              borderRadius: '6px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            <Download size={20} />
+            Export Excel
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem 1.5rem',
+              backgroundColor: '#fbbf24',
+              color: '#0f1115',
+              border: 'none',
+              borderRadius: '6px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            <Plus size={20} />
+            Add Job
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -193,6 +285,7 @@ export default function JobBoard() {
                     }}
                     onError={(e) => {
                       (e.target as HTMLImageElement).style.display = 'none';
+                      debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
                     }}
                   />
                 </div>

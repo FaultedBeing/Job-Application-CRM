@@ -4,6 +4,7 @@ import api from '../api';
 import { ArrowLeft, Plus, Edit, Trash2, Sun, Bell } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import AlertDialog from './AlertDialog';
+import { debugLog } from '../utils/debugLogger';
 
 interface Company {
   id: number;
@@ -16,6 +17,8 @@ interface Company {
   employee_count?: number;
   company_size?: string;
   dark_logo_bg?: boolean;
+  no_posted_jobs?: boolean;
+  no_appropriate_jobs?: boolean;
   __follow_up?: { due_at: string; message?: string; notify_desktop?: boolean; notify_email?: boolean } | null;
 }
 
@@ -103,6 +106,115 @@ interface Contact {
   phone?: string;
   linkedin_url?: string;
   nearest_reminder?: string;
+}
+
+function ReminderCard({ reminder, onDelete }: { reminder: any, onDelete: (id: number) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const isPast = !!reminder.sent_at;
+
+  if (isPast && !expanded) {
+    return (
+      <div
+        onClick={() => setExpanded(true)}
+        style={{
+          padding: '0.5rem 1rem',
+          marginBottom: '0.5rem',
+          backgroundColor: '#0f1115',
+          borderRadius: '6px',
+          borderLeft: '3px solid #fbbf24',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          cursor: 'pointer',
+          transition: 'all 0.2s'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontWeight: 'bold', fontSize: '0.85rem' }}>
+          <Bell size={12} />
+          Past Reminder
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#fbbf24' }}>
+            Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(reminder.id);
+            }}
+            title="Delete reminder"
+            style={{
+              padding: '0.25rem',
+              backgroundColor: 'transparent',
+              border: 'none',
+              color: '#4b5563',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={isPast ? () => setExpanded(false) : undefined}
+      style={{
+        padding: '1rem',
+        marginBottom: '0.5rem',
+        backgroundColor: isPast ? '#0f1115' : '#1a1d24',
+        borderRadius: '6px',
+        border: isPast ? '1px solid #2d3139' : '1px solid #fbbf24',
+        borderLeft: isPast ? '3px solid #fbbf24' : '4px solid #fbbf24',
+        display: 'flex',
+        justifyContent: 'space-between',
+        gap: '0.75rem',
+        cursor: isPast ? 'pointer' : 'default',
+        transition: 'all 0.2s'
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontWeight: 'bold' }}>
+            <Bell size={16} />
+            {isPast ? 'Past Reminder' : 'Upcoming Reminder'}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#9ca3af' }}>
+              <div style={{ color: isPast ? '#9ca3af' : '#fbbf24' }}>
+                Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+              </div>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(reminder.id);
+              }}
+              title="Delete reminder"
+              style={{
+                padding: '0.25rem',
+                backgroundColor: 'transparent',
+                border: 'none',
+                color: '#4b5563',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        </div>
+        <p style={{ color: '#e5e7eb', marginTop: '0.25rem' }}>{reminder.message}</p>
+      </div>
+    </div>
+  );
 }
 
 export default function CompanyDetail() {
@@ -212,21 +324,8 @@ export default function CompanyDetail() {
 
   async function handleUpdateCompany(updatedCompany: Company) {
     try {
-      const followUp = updatedCompany.__follow_up;
       const { __follow_up: _ignored, ...companyPayload } = updatedCompany as any;
-
-      // Update company fields
       await api.put(`/companies/${updatedCompany.id}`, companyPayload);
-
-      // Optionally create/update follow-up reminder (only if provided)
-      if (followUp?.due_at) {
-        await api.post(`/companies/${updatedCompany.id}/reminder`, {
-          due_at: followUp.due_at,
-          message: (followUp.message || '').trim() || `Follow up with ${updatedCompany.name}`,
-          notify_desktop: followUp.notify_desktop ?? true,
-          notify_email: followUp.notify_email ?? false
-        });
-      }
       setEditing(false);
       loadData();
     } catch (error) {
@@ -319,12 +418,47 @@ export default function CompanyDetail() {
                   }}
                   onError={(e) => {
                     (e.target as HTMLImageElement).style.display = 'none';
+                    debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
                   }}
                 />
               </div>
             )}
             <div>
-              <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', color: '#fbbf24' }}>{company.name}</h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', color: '#fbbf24' }}>{company.name}</h1>
+                {!!company.no_posted_jobs && (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                    padding: '0.25rem 0.75rem',
+                    borderRadius: '999px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                    color: '#f87171',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    border: '1px solid rgba(239, 68, 68, 0.3)'
+                  }}>
+                    No Posted Jobs
+                  </span>
+                )}
+                {!!company.no_appropriate_jobs && (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                    padding: '0.25rem 0.75rem',
+                    borderRadius: '999px',
+                    backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                    color: '#fb923c',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    border: '1px solid rgba(249, 115, 22, 0.3)'
+                  }}>
+                    No Appropriate Jobs
+                  </span>
+                )}
+              </div>
               {company.industry && (
                 <p style={{ color: '#9ca3af', marginBottom: '0.5rem' }}>{company.industry}</p>
               )}
@@ -466,23 +600,81 @@ export default function CompanyDetail() {
                 <h2 style={{ fontSize: '1.25rem', color: '#e5e7eb' }}>
                   Jobs ({jobs.length})
                 </h2>
-                <button
-                  onClick={() => setShowAddJob(true)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.5rem 1rem',
-                    backgroundColor: '#fbbf24',
-                    border: 'none',
-                    borderRadius: '6px',
-                    color: '#0f1115',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <Plus size={16} />
-                  Add Job
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <button
+                    onClick={() => setShowAddJob(true)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.5rem 1rem',
+                      backgroundColor: '#fbbf24',
+                      border: 'none',
+                      borderRadius: '6px',
+                      color: '#0f1115',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Plus size={16} />
+                    Add Job
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.put(`/companies/${company.id}`, {
+                          ...company,
+                          no_posted_jobs: !company.no_posted_jobs
+                        });
+                        loadData();
+                      } catch (error) {
+                        console.error('Error toggling no_posted_jobs:', error);
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      padding: '0.5rem 0.75rem',
+                      backgroundColor: company.no_posted_jobs ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
+                      border: company.no_posted_jobs ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid #4b5563',
+                      borderRadius: '6px',
+                      color: company.no_posted_jobs ? '#f87171' : '#9ca3af',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem'
+                    }}
+                    title={company.no_posted_jobs ? 'Remove "No Posted Jobs" flag' : 'Mark as "No Posted Jobs"'}
+                  >
+                    {company.no_posted_jobs ? '✕ Clear Flag' : '⚑ No Posted Jobs'}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.put(`/companies/${company.id}`, {
+                          ...company,
+                          no_appropriate_jobs: !company.no_appropriate_jobs
+                        });
+                        loadData();
+                      } catch (error) {
+                        console.error('Error toggling no_appropriate_jobs:', error);
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      padding: '0.5rem 0.75rem',
+                      backgroundColor: company.no_appropriate_jobs ? 'rgba(249, 115, 22, 0.15)' : 'transparent',
+                      border: company.no_appropriate_jobs ? '1px solid rgba(249, 115, 22, 0.3)' : '1px solid #4b5563',
+                      borderRadius: '6px',
+                      color: company.no_appropriate_jobs ? '#fb923c' : '#9ca3af',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem'
+                    }}
+                    title={company.no_appropriate_jobs ? 'Remove "No Appropriate Jobs" flag' : 'Mark as "No Appropriate Jobs"'}
+                  >
+                    {company.no_appropriate_jobs ? '✕ Clear Flag' : '⚑ No Appropriate Jobs'}
+                  </button>
+                </div>
               </div>
               <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1rem' }}>
                 {jobs.length === 0 ? (
@@ -612,6 +804,14 @@ export default function CompanyDetail() {
             </section>
           </div>
 
+          {/* Company Activity Section */}
+          <section style={{ marginTop: '2rem' }}>
+            <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', border: '1px solid #2d3139' }}>
+              <h2 style={{ fontSize: '1.25rem', color: '#e5e7eb', marginBottom: '1rem' }}>Company Activity</h2>
+              <ReminderSection companyId={company.id} companyName={company.name} onUpdate={loadData} />
+            </div>
+          </section>
+
           {showAddJob && (
             <AddJobModal
               companyName={company.name}
@@ -661,6 +861,173 @@ export default function CompanyDetail() {
   );
 }
 
+function ReminderSection({ companyId, companyName, onUpdate }: { companyId: number; companyName: string; onUpdate: () => void }) {
+  const [reminders, setReminders] = useState<any[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [followUpAt, setFollowUpAt] = useState('');
+  const [followUpMessage, setFollowUpMessage] = useState('');
+  const [notifyDesktop, setNotifyDesktop] = useState(true);
+  const [notifyEmail, setNotifyEmail] = useState(false);
+  const [followUpTimeZone, setFollowUpTimeZone] = useState<string>(getDefaultTimeZone());
+
+  useEffect(() => {
+    loadReminders();
+  }, [companyId]);
+
+  async function loadReminders() {
+    try {
+      const res = await api.get(`/companies/${companyId}/reminders`);
+      setReminders(Array.isArray(res.data) ? res.data : []);
+    } catch (error) {
+      console.error('Error loading company reminders:', error);
+    }
+  }
+
+  async function handleSetReminder() {
+    if (!followUpAt) return;
+    const dueIso = toUtcIsoFromLocal(followUpAt, followUpTimeZone) || new Date(followUpAt).toISOString();
+    try {
+      await api.post(`/companies/${companyId}/reminder`, {
+        due_at: dueIso,
+        message: followUpMessage.trim() || `Follow up with ${companyName}`,
+        notify_desktop: notifyDesktop,
+        notify_email: notifyEmail
+      });
+      setShowForm(false);
+      setFollowUpAt('');
+      setFollowUpMessage('');
+      loadReminders();
+      onUpdate();
+    } catch (error) {
+      console.error('Error setting reminder:', error);
+    }
+  }
+
+  async function handleDeleteReminder(reminderId: number) {
+    try {
+      await api.delete(`/reminders/${reminderId}`);
+      loadReminders();
+      onUpdate();
+    } catch (error) {
+      console.error('Error deleting reminder:', error);
+    }
+  }
+
+  return (
+    <div>
+      {/* Existing reminders */}
+      {reminders.length > 0 && (
+        <div style={{ marginBottom: '1rem' }}>
+          {reminders.map((reminder) => (
+            <ReminderCard key={reminder.id} reminder={reminder} onDelete={handleDeleteReminder} />
+          ))}
+        </div>
+      )}
+
+      {/* Add reminder button / form */}
+      {!showForm ? (
+        <button
+          onClick={() => setShowForm(true)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            padding: '0.5rem 1rem',
+            backgroundColor: 'transparent',
+            border: '1px solid #4b5563',
+            borderRadius: '6px',
+            color: '#e5e7eb',
+            cursor: 'pointer',
+            fontSize: '0.85rem',
+            marginTop: reminders.length > 0 ? '0.5rem' : 0
+          }}
+        >
+          <Bell size={14} />
+          Set Reminder
+        </button>
+      ) : (
+        <div style={{ padding: '1rem', backgroundColor: '#0f1115', borderRadius: '6px', border: '1px solid #2d3139', marginTop: reminders.length > 0 ? '0.5rem' : 0 }}>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer', fontSize: '0.85rem' }}>
+              <input type="checkbox" checked={notifyDesktop} onChange={(e) => setNotifyDesktop(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
+              Desktop notification
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer', fontSize: '0.85rem' }}>
+              <input type="checkbox" checked={notifyEmail} onChange={(e) => setNotifyEmail(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
+              Email me
+            </label>
+          </div>
+          <input
+            type="datetime-local"
+            value={followUpAt}
+            onChange={(e) => setFollowUpAt(e.target.value)}
+            className="dark-datetime"
+            style={{ width: '100%', padding: '0.75rem', marginBottom: '0.75rem' }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', fontSize: '0.8rem', marginBottom: '0.75rem' }}>
+            <span>Time zone:</span>
+            <select
+              value={followUpTimeZone}
+              onChange={(e) => setFollowUpTimeZone(e.target.value)}
+              style={{
+                padding: '0.25rem 0.5rem',
+                backgroundColor: '#0f1115',
+                border: '1px solid #2d3139',
+                borderRadius: '4px',
+                color: '#e5e7eb',
+                fontSize: '0.8rem'
+              }}
+            >
+              {COMMON_TIMEZONES.map((tz) => (
+                <option key={tz.id} value={tz.id}>
+                  {tz.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <input
+            type="text"
+            value={followUpMessage}
+            onChange={(e) => setFollowUpMessage(e.target.value)}
+            placeholder={`Optional note (default: "Follow up with ${companyName}")`}
+            style={{ width: '100%', padding: '0.75rem', backgroundColor: '#1a1d24', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', marginBottom: '0.75rem' }}
+          />
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              onClick={handleSetReminder}
+              disabled={!followUpAt}
+              style={{
+                padding: '0.5rem 1rem',
+                backgroundColor: !followUpAt ? '#4b5563' : '#fbbf24',
+                border: 'none',
+                borderRadius: '6px',
+                color: '#0f1115',
+                cursor: !followUpAt ? 'not-allowed' : 'pointer',
+                fontWeight: 500
+              }}
+            >
+              Save Reminder
+            </button>
+            <button
+              onClick={() => setShowForm(false)}
+              style={{
+                padding: '0.5rem 1rem',
+                backgroundColor: 'transparent',
+                border: '1px solid #4b5563',
+                borderRadius: '6px',
+                color: '#9ca3af',
+                cursor: 'pointer'
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSave: (company: Company) => void; onCancel: () => void }) {
   const [formData, setFormData] = useState({
     name: company.name,
@@ -669,15 +1036,12 @@ function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSa
     notes: company.notes || '',
     location: company.location || '',
     company_size: company.company_size || '',
-    dark_logo_bg: company.dark_logo_bg ?? false
+    dark_logo_bg: company.dark_logo_bg ?? false,
+    logo_url: company.logo_url
   });
   const [industryOptions, setIndustryOptions] = useState<string[]>([]);
-  const [enableFollowUp, setEnableFollowUp] = useState(false);
-  const [followUpAt, setFollowUpAt] = useState('');
-  const [followUpMessage, setFollowUpMessage] = useState('');
-  const [notifyDesktop, setNotifyDesktop] = useState(true);
-  const [notifyEmail, setNotifyEmail] = useState(false);
-  const [followUpTimeZone, setFollowUpTimeZone] = useState<string>(getDefaultTimeZone());
+  const [isDraggingLogo, setIsDraggingLogo] = useState(false);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
   useEffect(() => {
     loadIndustryOptions();
@@ -717,10 +1081,6 @@ function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSa
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const dueIso =
-      enableFollowUp && followUpAt
-        ? toUtcIsoFromLocal(followUpAt, followUpTimeZone) || new Date(followUpAt).toISOString()
-        : undefined;
     onSave({
       ...company,
       name: formData.name,
@@ -731,8 +1091,49 @@ function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSa
       company_size: formData.company_size || undefined,
       employee_count: undefined,
       dark_logo_bg: formData.dark_logo_bg,
-      __follow_up: enableFollowUp && dueIso ? { due_at: dueIso, message: followUpMessage, notify_desktop: notifyDesktop, notify_email: notifyEmail } : undefined
+      logo_url: formData.logo_url
     });
+  }
+
+  async function handleLogoUpload(file: File) {
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload a valid image file');
+      return;
+    }
+
+    setIsUploadingLogo(true);
+    try {
+      const formPayload = new FormData();
+      formPayload.append('logo', file);
+      const res = await api.post(`/companies/${company.id}/logo`, formPayload, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      // The backend returns the updated company object
+      setFormData(prev => ({ ...prev, logo_url: res.data.logo_url }));
+    } catch (error: any) {
+      console.error('Error uploading logo:', error);
+      alert('Failed to upload logo.');
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingLogo(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingLogo(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingLogo(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleLogoUpload(e.dataTransfer.files[0]);
+    }
   }
 
   return (
@@ -768,115 +1169,106 @@ function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSa
           style={{ width: '100%', padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
         />
       </div>
-      <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e5e7eb', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={enableFollowUp}
-            onChange={(e) => setEnableFollowUp(e.target.checked)}
-            style={{ accentColor: '#fbbf24', width: 18, height: 18, borderRadius: 4 }}
-          />
-          Add follow-up reminder
-        </label>
-        {enableFollowUp && (
-          <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.75rem' }}>
-            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer' }}>
-                <input type="checkbox" checked={notifyDesktop} onChange={(e) => setNotifyDesktop(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
-                Desktop notification
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', cursor: 'pointer' }}>
-                <input type="checkbox" checked={notifyEmail} onChange={(e) => setNotifyEmail(e.target.checked)} style={{ accentColor: '#fbbf24', width: 16, height: 16, borderRadius: 4 }} />
-                Email me (requires email setup in Settings)
-              </label>
-            </div>
-            <input
-              type="datetime-local"
-              value={followUpAt}
-              onChange={(e) => setFollowUpAt(e.target.value)}
-              className="dark-datetime"
-              style={{ width: '100%', padding: '0.75rem' }}
-            />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#9ca3af', fontSize: '0.8rem' }}>
-              <span>Time zone:</span>
-              <select
-                value={followUpTimeZone}
-                onChange={(e) => setFollowUpTimeZone(e.target.value)}
-                style={{
-                  padding: '0.25rem 0.5rem',
-                  backgroundColor: '#0f1115',
-                  border: '1px solid #2d3139',
-                  borderRadius: '4px',
-                  color: '#e5e7eb',
-                  fontSize: '0.8rem'
-                }}
-              >
-                {COMMON_TIMEZONES.map((tz) => (
-                  <option key={tz.id} value={tz.id}>
-                    {tz.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <input
-              type="text"
-              value={followUpMessage}
-              onChange={(e) => setFollowUpMessage(e.target.value)}
-              placeholder={`Optional reminder note (default: "Follow up with ${company.name}")`}
-              style={{ width: '100%', padding: '0.75rem', backgroundColor: '#1a1d24', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
-            />
-          </div>
-        )}
-      </div>
-      {company.logo_url && (
-        <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+      <div style={{ marginBottom: '1rem' }}>
+        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>Company Logo</label>
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
           <div
             style={{
-              width: '56px',
-              height: '56px',
+              width: '80px',
+              height: '80px',
               borderRadius: '8px',
-              padding: '6px',
+              padding: '8px',
               backgroundColor: formData.dark_logo_bg ? '#e5e7eb' : '#0f1115',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              border: '1px solid #2d3139'
+              border: isDraggingLogo ? '2px dashed #fbbf24' : '1px solid #2d3139',
+              position: 'relative'
             }}
           >
-            <img
-              src={company.logo_url}
-              alt={`${company.name} logo preview`}
-              style={{
-                maxWidth: '100%',
-                maxHeight: '100%',
-                objectFit: 'contain'
-              }}
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = 'none';
-              }}
-            />
+            {isUploadingLogo ? (
+              <div style={{ color: '#9ca3af', fontSize: '0.8rem' }}>Uploading...</div>
+            ) : formData.logo_url ? (
+              <img
+                src={formData.logo_url}
+                alt={`${company.name} logo preview`}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  objectFit: 'contain'
+                }}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                  debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
+                }}
+              />
+            ) : (
+              <div style={{ color: '#6b7280', fontSize: '0.8rem', textAlign: 'center' }}>No logo</div>
+            )}
           </div>
-          <button
-            type="button"
-            onClick={() => setFormData({ ...formData, dark_logo_bg: !formData.dark_logo_bg })}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.4rem 0.75rem',
-              borderRadius: '999px',
-              border: '1px solid #2d3139',
-              backgroundColor: '#0f1115',
-              color: '#e5e7eb',
-              cursor: 'pointer',
-              fontSize: '0.8rem'
-            }}
-          >
-            <Sun size={14} />
-            <span>{formData.dark_logo_bg ? 'Light background for dark logos' : 'Dark background'}</span>
-          </button>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '6px',
+                  backgroundColor: '#2d3139',
+                  color: '#e5e7eb',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  fontWeight: 500
+                }}
+              >
+                Upload Manual Logo
+                <input
+                  type="file"
+                  accept="image/png, image/jpeg, image/jpg, image/svg+xml, image/webp, image/x-icon, .ico"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      handleLogoUpload(e.target.files[0]);
+                    }
+                  }}
+                />
+              </label>
+            </div>
+            {formData.logo_url && (
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, dark_logo_bg: !formData.dark_logo_bg })}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.4rem 0.75rem',
+                  borderRadius: '999px',
+                  border: '1px solid #2d3139',
+                  backgroundColor: '#0f1115',
+                  color: '#e5e7eb',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  width: 'fit-content'
+                }}
+              >
+                <Sun size={14} />
+                <span>{formData.dark_logo_bg ? 'Light field for dark logos' : 'Dark field background'}</span>
+              </button>
+            )}
+            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+              Drag an image here, or upload one.
+            </div>
+          </div>
         </div>
-      )}
+      </div>
       <div style={{ marginBottom: '1rem' }}>
         <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>Industry</label>
         <select
@@ -926,7 +1318,7 @@ function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSa
           Save
         </button>
       </div>
-    </form>
+    </form >
   );
 }
 

@@ -2,11 +2,12 @@ import { Express, Request, Response } from 'express';
 import { Multer } from 'multer';
 import { Database } from './database';
 import fs from 'fs-extra';
+import path from 'path';
 import { fetchCompanyLogo, fetchCompanyInfo } from './companyEnrichment';
 import nodemailer from 'nodemailer';
 import * as XLSX from 'xlsx';
 
-export function setupRoutes(app: Express, db: Database, upload: Multer) {
+export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsPath: string) {
   // Companies
   app.get('/api/companies', async (req: Request, res: Response) => {
     try {
@@ -53,7 +54,7 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
 
       // Fetch logo if website is provided
       if (companyData.website && !companyData.logo_url) {
-        const logoUrl = await fetchCompanyLogo(companyData.website);
+        const logoUrl = await fetchCompanyLogo(companyData.website, uploadsPath);
         if (logoUrl) {
           companyData.logo_url = logoUrl;
         }
@@ -84,11 +85,23 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
     try {
       let companyData = { ...req.body };
 
-      // Fetch logo if website is provided and logo_url is not set
-      if (companyData.website && !companyData.logo_url) {
-        const existingCompany = await db.getCompany(parseInt(req.params.id));
-        if (!existingCompany?.logo_url) {
-          const logoUrl = await fetchCompanyLogo(companyData.website);
+      // Fetch existing company to check for website changes
+      const existingCompany = await db.getCompany(parseInt(req.params.id));
+
+      if (existingCompany) {
+        // Did the website change?
+        if (companyData.website !== existingCompany.website) {
+          if (!companyData.website) {
+            // Website was cleared, clear the logo
+            companyData.logo_url = null;
+          } else {
+            // Website was changed, force a new logo fetch
+            const logoUrl = await fetchCompanyLogo(companyData.website, uploadsPath);
+            companyData.logo_url = logoUrl || null;
+          }
+        } else if (companyData.website && !companyData.logo_url && !existingCompany.logo_url) {
+          // Website is the same, but no logo exists. Try fetching again (perhaps it was added recently)
+          const logoUrl = await fetchCompanyLogo(companyData.website, uploadsPath);
           if (logoUrl) {
             companyData.logo_url = logoUrl;
           }
@@ -98,6 +111,44 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
       const company = await db.updateCompany(parseInt(req.params.id), companyData);
       res.json(company);
     } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/companies/:id/logo', upload.single('logo'), async (req: Request, res: Response) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No logo file uploaded' });
+      }
+
+      const existingCompany = await db.getCompany(parseInt(req.params.id));
+      if (!existingCompany) {
+        // Clean up the uploaded file since the company doesn't exist
+        await fs.remove(req.file.path);
+        return res.status(404).json({ error: 'Company not found' });
+      }
+
+      // We need to move the file to the logos directory to keep things organized
+      const logosDir = path.join(uploadsPath, 'logos');
+      await fs.ensureDir(logosDir);
+
+      const targetPath = path.join(logosDir, req.file.filename);
+      await fs.move(req.file.path, targetPath);
+
+      // Update the company's logo URL in the database
+      const relativeUrl = `/uploads/logos/${req.file.filename}`;
+      const updatedCompany = await db.updateCompany(existingCompany.id, {
+        ...existingCompany,
+        logo_url: relativeUrl
+      });
+
+      res.json(updatedCompany);
+    } catch (error: any) {
+      // Try to clean up if something failed
+      if (req.file) {
+        await fs.remove(req.file.path).catch(() => { });
+      }
+      console.error('Error handling logo upload:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -368,6 +419,17 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
     }
   });
 
+  // Company reminders (read + write)
+  app.get('/api/companies/:id/reminders', async (req: Request, res: Response) => {
+    try {
+      const companyId = parseInt(req.params.id);
+      const reminders = await db.getCompanyReminders(companyId);
+      res.json(reminders);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Company follow-up reminder (single reminder per company)
   app.post('/api/companies/:id/reminder', async (req: Request, res: Response) => {
     try {
@@ -588,6 +650,84 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
     }
   });
 
+  app.get('/api/export/excel', async (req: Request, res: Response) => {
+    try {
+      const data = await db.exportData();
+
+      // Create a new workbook
+      const wb = XLSX.utils.book_new();
+
+      // Map Companies for export
+      const companiesExport = data.companies.map((c: any) => ({
+        'Name': c.name,
+        'Industry': c.industry,
+        'Company Size': c.company_size,
+        'Location': c.location,
+        'Website': c.website,
+        'Employee Count': c.employee_count,
+        'Notes': c.notes,
+        'Last Interaction': c.last_interaction
+      }));
+
+      // Map Jobs for export
+      const jobsExport = data.jobs.map((j: any) => ({
+        'Company': j.company_name,
+        'Title': j.title,
+        'Status': j.status,
+        'Location': j.location,
+        'Fit Score': j.fit_score,
+        'Excitement Score': j.excitement_score,
+        'Link': j.link,
+        'Created At': j.created_at,
+        'Notes': j.notes,
+        'Description': j.description
+      }));
+
+      // Map Contacts for export
+      const contactsExport = data.contacts.map((c: any) => ({
+        'Name': c.name,
+        'Role': c.role,
+        'Email': c.email,
+        'Phone': c.phone,
+        'LinkedIn': c.linkedin_url,
+        'Company': data.companies.find((co: any) => co.id === c.company_id)?.name || '',
+        'Notes': c.notes,
+        'Last Interaction': c.last_interaction
+      }));
+
+      // Convert to sheets
+      if (companiesExport.length > 0) {
+        const ws = XLSX.utils.json_to_sheet(companiesExport);
+        XLSX.utils.book_append_sheet(wb, ws, 'Companies');
+      }
+
+      if (jobsExport.length > 0) {
+        const ws = XLSX.utils.json_to_sheet(jobsExport);
+        XLSX.utils.book_append_sheet(wb, ws, 'Jobs');
+      }
+
+      if (contactsExport.length > 0) {
+        const ws = XLSX.utils.json_to_sheet(contactsExport);
+        XLSX.utils.book_append_sheet(wb, ws, 'Contacts');
+      }
+
+      if (data.interactions && data.interactions.length > 0) {
+        const ws = XLSX.utils.json_to_sheet(data.interactions);
+        XLSX.utils.book_append_sheet(wb, ws, 'Interactions');
+      }
+
+      // Buffer to hold the Excel file
+      const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+      res.setHeader('Content-Disposition', `attachment; filename="job-tracker-export-${new Date().toISOString().split('T')[0]}.xlsx"`);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.send(buf);
+    } catch (error: any) {
+      console.error('Excel export error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post('/api/reset-database', async (req: Request, res: Response) => {
     try {
       await db.resetDatabase();
@@ -730,19 +870,15 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
       }
 
       const workbook = XLSX.readFile(req.file.path);
-
-      // Try "Companies" sheet first, then fall back to the first sheet
       const sheetName = workbook.SheetNames.includes('Companies')
         ? 'Companies'
         : workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
       const rows: any[] = XLSX.utils.sheet_to_json(sheet);
 
-      // Get existing company names for duplicate detection
       const existingCompanies = await db.getCompanies();
       const existingNames = new Set(existingCompanies.map((c: any) => c.name?.toLowerCase().trim()));
 
-      // Get existing industries from settings
       const settings = await db.getSettings();
       const existingIndustries: string[] = settings.industries
         ? settings.industries.split('|').map((s: string) => s.trim()).filter(Boolean)
@@ -762,22 +898,38 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
           continue;
         }
 
-        // Skip duplicates
         if (existingNames.has(name.toLowerCase())) {
           skipped++;
           continue;
         }
 
-        // Build notes from Description, Tagline, Specialities, LinkedIn URL
-        const noteParts: string[] = [];
-        if (row['Tagline']) noteParts.push(row['Tagline'].toString().trim());
-        if (row['Description']) noteParts.push(row['Description'].toString().trim());
-        if (row['Specialities']) noteParts.push(`Specialities: ${row['Specialities'].toString().trim()}`);
-        if (row['LinkedIn URL']) noteParts.push(`LinkedIn: ${row['LinkedIn URL'].toString().trim()}`);
-
+        // Handle both Import and Export format
         const industry = (row['Industry'] || '').toString().trim();
+        const website = (row['Website'] || '').toString().trim() || null;
+        const employeeRange = row['Company Size'] || row['Employee Range'] || null;
+        const employeeCount = row['Employee Count'] ? parseInt(row['Employee Count']) : null;
 
-        // Auto-add new industry labels
+        // Location logic: use 'Location' (export) or parse 'Address' (LinkedIn import)
+        let location = null;
+        if (row['Location']) {
+          location = row['Location'].toString().trim();
+        } else if (row['Address']) {
+          location = parseCityState(row['Address'].toString().trim());
+        }
+
+        // Notes logic: use 'Notes' (export) or build from LinkedIn parts
+        let notes = null;
+        if (row['Notes']) {
+          notes = row['Notes'].toString().trim();
+        } else {
+          const noteParts: string[] = [];
+          if (row['Tagline']) noteParts.push(row['Tagline'].toString().trim());
+          if (row['Description']) noteParts.push(row['Description'].toString().trim());
+          if (row['Specialities']) noteParts.push(`Specialities: ${row['Specialities'].toString().trim()}`);
+          if (row['LinkedIn URL']) noteParts.push(`LinkedIn: ${row['LinkedIn URL'].toString().trim()}`);
+          notes = noteParts.length > 0 ? noteParts.join('\n\n') : null;
+        }
+
         if (industry && !industrySet.has(industry.toLowerCase())) {
           industrySet.add(industry.toLowerCase());
           newIndustries.push(industry);
@@ -786,20 +938,18 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
         try {
           const created = await db.createCompany({
             name,
-            website: (row['Website'] || '').toString().trim() || null,
+            website,
             industry: industry || null,
-            notes: noteParts.length > 0 ? noteParts.join('\n\n') : null,
-            location: parseCityState((row['Address'] || '').toString().trim()),
-            employee_count: null,
-            company_size: (row['Employee Range'] || '').toString().trim() || null,
+            notes,
+            location,
+            employee_count: employeeCount,
+            company_size: employeeRange ? employeeRange.toString().trim() : null,
             logo_url: null,
             dark_logo_bg: false
           });
           existingNames.add(name.toLowerCase());
           imported++;
 
-          // Track for background logo fetch
-          const website = (row['Website'] || '').toString().trim();
           if (created && website) {
             importedCompanies.push({ id: created.id, website });
           }
@@ -808,38 +958,127 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
         }
       }
 
-      // Persist new industry labels to settings
       if (newIndustries.length > 0) {
         const allIndustries = [...existingIndustries, ...newIndustries];
         await db.updateSetting('industries', allIndustries.join('|'));
       }
 
-      // Clean up uploaded file
       await fs.remove(req.file.path);
-
       res.json({ imported, skipped, errors, newIndustries });
 
-      // Background: fetch logos for imported companies with websites
       if (importedCompanies.length > 0) {
         (async () => {
           for (const { id, website } of importedCompanies) {
             try {
-              const logoUrl = await fetchCompanyLogo(website);
+              const logoUrl = await fetchCompanyLogo(website, uploadsPath);
               if (logoUrl) {
                 const company = await db.getCompany(id);
-                if (company) {
-                  await db.updateCompany(id, { ...company, logo_url: logoUrl });
-                }
+                if (company) await db.updateCompany(id, { ...company, logo_url: logoUrl });
               }
             } catch (err) {
               console.error(`Logo fetch failed for company ${id}:`, err);
             }
           }
-          console.log(`Logo fetch complete for ${importedCompanies.length} companies`);
         })();
       }
     } catch (error: any) {
       console.error('Import error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Import jobs from Excel
+  app.post('/api/import/jobs', upload.single('file'), async (req: Request, res: Response) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+      const workbook = XLSX.readFile(req.file.path);
+      const sheetName = workbook.SheetNames.includes('Jobs') ? 'Jobs' : workbook.SheetNames[0];
+      const rows: any[] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+      let imported = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+
+      for (const row of rows) {
+        const title = (row['Title'] || '').toString().trim();
+        const companyName = (row['Company'] || '').toString().trim();
+        if (!title || !companyName) { skipped++; continue; }
+
+        try {
+          // Link to or create company
+          const company = await db.findOrCreateCompany(companyName);
+
+          await db.createJob({
+            company_id: company.id,
+            title,
+            status: row['Status'] || 'Interested',
+            location: row['Location'] || null,
+            fit_score: parseInt(row['Fit Score']) || 1,
+            excitement_score: parseInt(row['Excitement Score']) || 1,
+            link: row['Link'] || null,
+            notes: row['Notes'] || null,
+            description: row['Description'] || null,
+            created_at: row['Created At'] || new Date().toISOString()
+          });
+          imported++;
+        } catch (err: any) {
+          errors.push(`${title} @ ${companyName}: ${err.message}`);
+        }
+      }
+
+      await fs.remove(req.file.path);
+      res.json({ imported, skipped, errors });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Import contacts from Excel
+  app.post('/api/import/contacts', upload.single('file'), async (req: Request, res: Response) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+      const workbook = XLSX.readFile(req.file.path);
+      const sheetName = workbook.SheetNames.includes('Contacts') ? 'Contacts' : workbook.SheetNames[0];
+      const rows: any[] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+      let imported = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+
+      for (const row of rows) {
+        const name = (row['Name'] || '').toString().trim();
+        const companyName = (row['Company'] || '').toString().trim();
+        const email = (row['Email'] || '').toString().trim();
+        if (!name) { skipped++; continue; }
+
+        try {
+          let companyId = null;
+          if (companyName) {
+            const company = await db.findOrCreateCompany(companyName);
+            companyId = company.id;
+          }
+
+          await db.createContact({
+            company_id: companyId,
+            name,
+            role: row['Role'] || null,
+            email: email || null,
+            phone: row['Phone'] || null,
+            linkedin_url: row['LinkedIn'] || null,
+            notes: row['Notes'] || null,
+            last_interaction: row['Last Interaction'] || null
+          });
+          imported++;
+        } catch (err: any) {
+          errors.push(`${name}: ${err.message}`);
+        }
+      }
+
+      await fs.remove(req.file.path);
+      res.json({ imported, skipped, errors });
+    } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });

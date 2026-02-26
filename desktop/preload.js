@@ -22,5 +22,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   gmailSendTest: (payload) => {
     return ipcRenderer.invoke('gmail-send-test', payload);
+  },
+  // Update system
+  onUpdateAvailable: (callback) => {
+    ipcRenderer.on('update-available', (_event, info) => callback(info));
+  },
+  onUpdateDownloaded: (callback) => {
+    ipcRenderer.on('update-downloaded', (_event, info) => callback(info));
+  },
+  onDownloadProgress: (callback) => {
+    ipcRenderer.on('download-progress', (_event, progress) => callback(progress));
+  },
+  onUpdateError: (callback) => {
+    ipcRenderer.on('update-error', (_event, err) => callback(err));
+  },
+  downloadUpdate: () => {
+    ipcRenderer.send('download-update');
+  },
+  quitAndInstallUpdate: () => {
+    ipcRenderer.send('quit-and-install');
   }
 });

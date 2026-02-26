@@ -50,11 +50,11 @@ if (NODE_ENV === 'production') {
   // In production (Electron), use AppData or resourcesPath
   const appDataPath = process.env.APPDATA || path.join(process.env.HOME || '', '.job-tracker');
   const resourcesPath = process.env.RESOURCES_PATH || path.join(__dirname, '..');
-  
+
   // Try resourcesPath first (Electron extraResources), fallback to AppData
   const possibleDbPath = path.join(resourcesPath, 'database.sqlite');
   dbPath = fs.existsSync(possibleDbPath) ? possibleDbPath : path.join(appDataPath, 'database.sqlite');
-  
+
   uploadsPath = process.env.UPLOADS_PATH || path.join(appDataPath, 'uploads');
   frontendPath = process.env.FRONTEND_PATH || path.join(resourcesPath, 'client-dist');
 } else {
@@ -97,7 +97,7 @@ app.get('/health', (_req, res) => {
 });
 
 // API routes
-setupRoutes(app, db, upload);
+setupRoutes(app, db, upload, uploadsPath);
 
 // Serve frontend when a built client exists
 if (fs.existsSync(frontendPath)) {

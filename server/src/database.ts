@@ -146,6 +146,8 @@ export class Database {
         notes TEXT,
         location TEXT,
         dark_logo_bg INTEGER DEFAULT 0,
+        no_posted_jobs INTEGER DEFAULT 0,
+        no_appropriate_jobs INTEGER DEFAULT 0,
         last_interaction DATETIME DEFAULT CURRENT_TIMESTAMP,
         logo_url TEXT,
         employee_count INTEGER,
@@ -158,6 +160,8 @@ export class Database {
     await this.run(`ALTER TABLE companies ADD COLUMN employee_count INTEGER`);
     await this.run(`ALTER TABLE companies ADD COLUMN company_size TEXT`);
     await this.run(`ALTER TABLE companies ADD COLUMN location TEXT`);
+    await this.run(`ALTER TABLE companies ADD COLUMN no_posted_jobs INTEGER DEFAULT 0`);
+    await this.run(`ALTER TABLE companies ADD COLUMN no_appropriate_jobs INTEGER DEFAULT 0`);
 
     await this.run(`
       CREATE TABLE IF NOT EXISTS jobs (
@@ -263,6 +267,10 @@ export class Database {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Add new columns to notifications if they don't exist
+    await this.run(`ALTER TABLE notifications ADD COLUMN logo_url TEXT`);
+    await this.run(`ALTER TABLE notifications ADD COLUMN icon_bg TEXT`);
     // Allow multiple notifications over time for the same reminder (e.g. recurring contact check-ins)
     // Unique per reminder + due time.
     try {
@@ -349,8 +357,8 @@ export class Database {
       'Other Space-Related'
     ].join('|');
 
-    // If no industries exist, or if using old comma format (no pipe), reset to defaults
-    if (!existingIndustries || !existingIndustries.value || !existingIndustries.value.includes('|')) {
+    // If no industries exist, or if using old comma format (no pipe but has comma), reset to defaults
+    if (!existingIndustries || !existingIndustries.value || (existingIndustries.value.includes(',') && !existingIndustries.value.includes('|'))) {
       await this.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [
         'industries',
         defaultIndustries
@@ -433,16 +441,16 @@ export class Database {
 
   async createCompany(data: any) {
     await this.run(
-      'INSERT INTO companies (name, website, industry, notes, location, dark_logo_bg, logo_url, employee_count, company_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null]
+      'INSERT INTO companies (name, website, industry, notes, location, dark_logo_bg, no_posted_jobs, no_appropriate_jobs, logo_url, employee_count, company_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null]
     );
     return await this.get('SELECT * FROM companies WHERE name = ?', [data.name]);
   }
 
   async updateCompany(id: number, data: any) {
     await this.run(
-      'UPDATE companies SET name = ?, website = ?, industry = ?, notes = ?, location = ?, dark_logo_bg = ?, logo_url = ?, employee_count = ?, company_size = ? WHERE id = ?',
-      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null, id]
+      'UPDATE companies SET name = ?, website = ?, industry = ?, notes = ?, location = ?, dark_logo_bg = ?, no_posted_jobs = ?, no_appropriate_jobs = ?, logo_url = ?, employee_count = ?, company_size = ? WHERE id = ?',
+      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null, id]
     );
     return await this.getCompany(id);
   }
@@ -926,14 +934,22 @@ export class Database {
     await this.upsertReminder({
       entity_type: 'company',
       entity_id: companyId,
-      source: 'follow_up',
+      source: 'manual', // Use 'manual' to allow multiple reminders/history
       due_at: dueAt,
       message,
       link_path: `/company/${companyId}`,
       notify_desktop: opts?.notify_desktop ?? true,
       notify_email: opts?.notify_email ?? false
     });
-    return await this.get('SELECT * FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ?', ['company', companyId, 'follow_up']);
+    return await this.get('SELECT * FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ? ORDER BY id DESC LIMIT 1', ['company', companyId, 'manual']);
+  }
+
+  async getCompanyReminders(companyId: number) {
+    return await this.all(
+      `SELECT * FROM reminders WHERE entity_type = 'company' AND entity_id = ?
+       ORDER BY CASE WHEN sent_at IS NULL THEN 0 ELSE 1 END, due_at ASC;`,
+      [companyId]
+    );
   }
 
   async clearCompanyReminder(companyId: number) {
@@ -1013,27 +1029,79 @@ export class Database {
 
   // --- Notifications (hub) ---
   async syncDueRemindersToNotifications(nowIso: string) {
-    // Create notification rows for any due reminders that haven't been converted yet
     const due: any[] = await this.all(
       `SELECT * FROM reminders WHERE sent_at IS NULL AND due_at <= ? ORDER BY due_at ASC`,
       [nowIso]
     );
+
     let created = 0;
     for (const r of due) {
-      // Insert notification if missing, then update it to match latest reminder fields
+      let richTitle = 'Follow-up reminder';
+      let logoUrl = null;
+      let iconBg = null;
+
+      try {
+        if (r.entity_type === 'company') {
+          const co = await this.get('SELECT name, logo_url, dark_logo_bg FROM companies WHERE id = ?', [r.entity_id]);
+          if (co) {
+            richTitle = `Company: ${co.name}`;
+            logoUrl = co.logo_url;
+            iconBg = co.dark_logo_bg ? '#e5e7eb' : null;
+          }
+        } else if (r.entity_type === 'job') {
+          const j = await this.get(`
+            SELECT j.title, c.name as company_name, c.logo_url, c.dark_logo_bg 
+            FROM jobs j 
+            LEFT JOIN companies c ON j.company_id = c.id 
+            WHERE j.id = ?`, [r.entity_id]);
+          if (j) {
+            richTitle = j.company_name ? `${j.title} @ ${j.company_name}` : j.title;
+            logoUrl = j.logo_url;
+            iconBg = j.dark_logo_bg ? '#e5e7eb' : null;
+          }
+        } else if (r.entity_type === 'contact') {
+          const c = await this.get(`
+            SELECT c.name, co.name as company_name, co.logo_url, co.dark_logo_bg 
+            FROM contacts c 
+            LEFT JOIN companies co ON c.company_id = co.id 
+            WHERE c.id = ?`, [r.entity_id]);
+          if (c) {
+            richTitle = c.company_name ? `${c.name} @ ${c.company_name}` : c.name;
+            logoUrl = c.logo_url;
+            iconBg = c.dark_logo_bg ? '#e5e7eb' : null;
+          }
+        } else if (r.entity_type === 'interaction') {
+          const i = await this.get(`
+            SELECT i.type, c.name as contact_name, co.name as company_name, co.logo_url, co.dark_logo_bg
+            FROM interactions i
+            LEFT JOIN contacts c ON i.contact_id = c.id
+            LEFT JOIN companies co ON i.company_id = co.id
+            WHERE i.id = ?`, [r.entity_id]);
+          if (i) {
+            const part1 = i.contact_name || i.type || 'Interaction';
+            richTitle = i.company_name ? `${part1} @ ${i.company_name}` : part1;
+            logoUrl = i.logo_url;
+            iconBg = i.dark_logo_bg ? '#e5e7eb' : null;
+          }
+        }
+      } catch (_e) {
+        // Fallback to default title if hydration fails
+      }
+
       await this.run(
         `INSERT OR IGNORE INTO notifications
-           (reminder_id, entity_type, entity_id, due_at, title, message, link_path, notify_desktop, notify_email)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [r.id, r.entity_type, r.entity_id, r.due_at, 'Follow-up reminder', r.message, r.link_path || null, r.notify_desktop ?? 1, r.notify_email ?? 0]
+           (reminder_id, entity_type, entity_id, due_at, title, message, link_path, notify_desktop, notify_email, logo_url, icon_bg)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [r.id, r.entity_type, r.entity_id, r.due_at, richTitle, r.message, r.link_path || null, r.notify_desktop ?? 1, r.notify_email ?? 0, logoUrl, iconBg]
       );
+
       await this.run(
         `UPDATE notifications
-         SET due_at = ?, message = ?, link_path = ?, notify_desktop = ?, notify_email = ?
+         SET due_at = ?, title = ?, message = ?, link_path = ?, notify_desktop = ?, notify_email = ?, logo_url = ?, icon_bg = ?
          WHERE reminder_id = ? AND due_at = ?`,
-        [r.due_at, r.message, r.link_path || null, r.notify_desktop ?? 1, r.notify_email ?? 0, r.id, r.due_at]
+        [r.due_at, richTitle, r.message, r.link_path || null, r.notify_desktop ?? 1, r.notify_email ?? 0, logoUrl, iconBg, r.id, r.due_at]
       );
-      // Mark reminder as "converted" so it won't be re-processed
+
       await this.run('UPDATE reminders SET sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [r.id]);
       created += 1;
     }

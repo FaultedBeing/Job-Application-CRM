@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
 import { Briefcase, TrendingUp, Bell } from 'lucide-react';
+import { debugLog } from '../utils/debugLogger';
 
 interface Job {
   id: number;
@@ -20,6 +21,8 @@ interface Company {
   name: string;
   logo_url?: string;
   dark_logo_bg?: boolean;
+  no_posted_jobs?: boolean;
+  no_appropriate_jobs?: boolean;
   last_interaction: string;
   nearest_reminder?: string;
 }
@@ -50,6 +53,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadData();
+    const interval = setInterval(loadData, 30000); // Auto-update every 30s
+    return () => clearInterval(interval);
   }, []);
 
   async function loadData() {
@@ -142,9 +147,34 @@ export default function Dashboard() {
                     color: '#e5e7eb'
                   }}
                 >
-                  <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>{n.title || 'Reminder'}</div>
-                  <div style={{ color: '#9ca3af', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {n.message}
+                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                    {n.logo_url && (
+                      <div style={{
+                        width: '32px',
+                        height: '32px',
+                        backgroundColor: n.icon_bg || '#0f1115',
+                        borderRadius: '6px',
+                        padding: '4px',
+                        flexShrink: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '1px solid #2d3139'
+                      }}>
+                        <img
+                          src={n.logo_url}
+                          alt=""
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>{n.title || 'Reminder'}</div>
+                      <div style={{ color: '#9ca3af', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {n.message}
+                      </div>
+                    </div>
                   </div>
                 </Link>
               ))}
@@ -209,6 +239,7 @@ export default function Dashboard() {
                             }}
                             onError={(e) => {
                               (e.target as HTMLImageElement).style.display = 'none';
+                              debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
                             }}
                           />
                         )}
@@ -272,10 +303,43 @@ export default function Dashboard() {
                         }}
                         onError={(e) => {
                           (e.target as HTMLImageElement).style.display = 'none';
+                          debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
                         }}
                       />
                     )}
-                    <span>{company.name}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span>{company.name}</span>
+                      {!!company.no_posted_jobs && (
+                        <span style={{
+                          display: 'inline-flex',
+                          padding: '0.1rem 0.4rem',
+                          borderRadius: '999px',
+                          backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                          color: '#f87171',
+                          fontSize: '0.6rem',
+                          fontWeight: 600,
+                          border: '1px solid rgba(239, 68, 68, 0.3)',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          No Posted Jobs
+                        </span>
+                      )}
+                      {!!company.no_appropriate_jobs && (
+                        <span style={{
+                          display: 'inline-flex',
+                          padding: '0.1rem 0.4rem',
+                          borderRadius: '999px',
+                          backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                          color: '#fb923c',
+                          fontSize: '0.6rem',
+                          fontWeight: 600,
+                          border: '1px solid rgba(249, 115, 22, 0.3)',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          No Appropriate Jobs
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {company.nearest_reminder && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', fontSize: '0.75rem', marginTop: '0.5rem' }}>
@@ -339,6 +403,7 @@ export default function Dashboard() {
                         style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                         onError={(e) => {
                           (e.target as HTMLImageElement).style.display = 'none';
+                          debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
                         }}
                       />
                     </div>

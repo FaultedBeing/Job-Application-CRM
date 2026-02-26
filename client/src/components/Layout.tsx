@@ -1,6 +1,8 @@
 import { ReactNode } from 'react';
 import Sidebar from './Sidebar';
 import NotificationHub from './NotificationHub';
+import DebugConsole from './DebugConsole';
+import UpdateBanner from './UpdateBanner';
 
 interface LayoutProps {
   children: ReactNode;
@@ -11,6 +13,7 @@ export default function Layout({ children }: LayoutProps) {
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#0f1115' }}>
       <Sidebar />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh', overflow: 'hidden', marginLeft: '250px' }}>
+        <UpdateBanner />
         <header
           style={{
             flexShrink: 0,
@@ -25,6 +28,7 @@ export default function Layout({ children }: LayoutProps) {
         </header>
         <main style={{ flex: 1, padding: '2rem', overflowY: 'auto' }}>{children}</main>
       </div>
+      <DebugConsole />
     </div>
   );
 }

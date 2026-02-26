@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
-import { ArrowLeft, Plus, Edit, Calendar, Trash2, Search, Bell } from 'lucide-react';
+import { ArrowLeft, Plus, Edit, Calendar, Trash2, Search, Bell, Upload } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import AlertDialog from './AlertDialog';
+import { debugLog } from '../utils/debugLogger';
 
 interface Contact {
   id: number;
@@ -133,6 +134,8 @@ export default function Contacts() {
   const [searchTerm, setSearchTerm] = useState('');
   const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
   const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
+  const [importing, setImporting] = useState(false);
+
 
   useEffect(() => {
     if (id) {
@@ -267,6 +270,28 @@ export default function Contacts() {
     }
   }
 
+  async function handleImportFile(file: File) {
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/import/contacts', formData);
+      const { imported, skipped, errors } = res.data;
+      let msg = `Imported ${imported} contact${imported === 1 ? '' : 's'}.`;
+      if (skipped > 0) msg += `\n${skipped} skipped.`;
+      if (errors && errors.length > 0) msg += `\nErrors: ${errors.length}`;
+      setAlertMsg({ title: 'Import complete', message: msg });
+      loadContactsAndCompanies();
+    } catch (error: any) {
+      const serverMsg = error?.response?.data?.error || error?.message || 'Unknown error';
+      setAlertMsg({ title: 'Import failed', message: serverMsg });
+    } finally {
+      setImporting(false);
+      const input = document.getElementById('contact-import-input') as HTMLInputElement;
+      if (input) input.value = '';
+    }
+  }
+
   function handleDeleteContact(contactId: number) {
     setPendingConfirm({
       title: 'Delete contact',
@@ -361,6 +386,7 @@ export default function Contacts() {
                             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                             onError={(e) => {
                               (e.target as HTMLImageElement).style.display = 'none';
+                              debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
                             }}
                           />
                         </div>
@@ -615,20 +641,52 @@ export default function Contacts() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <h1 style={{ fontSize: '2rem', color: '#fbbf24' }}>Contacts</h1>
-        <button
-          onClick={() => setShowAddContact(true)}
-          style={{
-            padding: '0.75rem 1.5rem',
-            backgroundColor: '#fbbf24',
-            color: '#0f1115',
-            border: 'none',
-            borderRadius: '6px',
-            fontWeight: 'bold',
-            cursor: 'pointer'
-          }}
-        >
-          Add Contact
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <input
+            id="contact-import-input"
+            type="file"
+            accept=".xlsx,.xls"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleImportFile(file);
+            }}
+          />
+          <button
+            onClick={() => document.getElementById('contact-import-input')?.click()}
+            disabled={importing}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem 1.5rem',
+              backgroundColor: 'transparent',
+              color: '#34d399',
+              border: '1px solid #34d399',
+              borderRadius: '6px',
+              fontWeight: 'bold',
+              cursor: importing ? 'not-allowed' : 'pointer',
+              opacity: importing ? 0.6 : 1
+            }}
+          >
+            <Upload size={16} />
+            {importing ? 'Importing…' : 'Import'}
+          </button>
+          <button
+            onClick={() => setShowAddContact(true)}
+            style={{
+              padding: '0.75rem 1.5rem',
+              backgroundColor: '#fbbf24',
+              color: '#0f1115',
+              border: 'none',
+              borderRadius: '6px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            Add Contact
+          </button>
+        </div>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', gap: '1rem' }}>
@@ -763,6 +821,7 @@ export default function Contacts() {
                             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                             onError={(e) => {
                               (e.target as HTMLImageElement).style.display = 'none';
+                              debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
                             }}
                           />
                         </div>

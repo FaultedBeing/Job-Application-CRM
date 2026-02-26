@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api';
 import { ArrowLeft, Edit, Plus, Upload, Trash2, ExternalLink, Pencil, Check, X, Bell } from 'lucide-react';
-import USMap from './USMap';
+import LocationMap from './LocationMap';
 import ConfirmDialog from './ConfirmDialog';
 import AlertDialog from './AlertDialog';
+import { debugLog } from '../utils/debugLogger';
 
 interface Job {
   id: number;
@@ -542,6 +543,7 @@ export default function JobDetail() {
                   }}
                   onError={(e) => {
                     (e.target as HTMLImageElement).style.display = 'none';
+                    debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
                   }}
                 />
               )}
@@ -638,7 +640,7 @@ export default function JobDetail() {
                   <div style={{ color: job.location ? '#e5e7eb' : '#6b7280', marginTop: '0.5rem' }}>
                     {job.location || '—'}
                   </div>
-                  {job.location && showJobMap && <USMap location={job.location} height={220} />}
+                  {job.location && showJobMap && <LocationMap location={job.location} height={220} />}
                 </div>
                 {job.link && (
                   <div style={{ marginBottom: '1rem' }}>

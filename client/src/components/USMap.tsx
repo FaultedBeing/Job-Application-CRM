@@ -290,49 +290,60 @@ export default function USMap({ location, height = 200 }: USMapProps) {
   // Choose a subset of nearby cities whose labels won't overlap too badly
   const labeledRefs = useMemo(() => {
     if (!targetXY) return [];
-    const minDistToTarget = vbWidth * 0.08;   // keep some space from main pin (increased)
-    const minDistBetween = vbWidth * 0.09;    // avoid labels on top of each other
-    const labelStartOffset = refDotR + 3;      // label text starts this many pixels right of dot
+    // We'll define areas for each label to detect collisions.
+    type Rect = { x1: number; y1: number; x2: number; y2: number };
+    const intersects = (r1: Rect, r2: Rect) => {
+      return !(r1.x2 < r2.x1 || r1.x1 > r2.x2 || r1.y2 < r2.y1 || r1.y1 > r2.y2);
+    };
 
-    const selected: { city: CityEntry; xy: [number, number] }[] = [];
+    if (!active || !targetXY) return [];
+
+    // Calculate target label box
+    const targetLabelText = `${formatDisplayName(active.c)}, ${active.s}`;
+    const targetW = targetLabelText.length * labelSize * 0.6;
+    const targetRect: Rect = {
+      x1: targetXY[0] - pinR, // Include pin area
+      y1: targetXY[1] - labelSize * 0.5,
+      x2: targetXY[0] + pinR + 5 + targetW,
+      y2: targetXY[1] + labelSize * 0.5
+    };
+
+    const selected: { city: CityEntry; xy: [number, number]; rect: Rect }[] = [];
+
     for (let i = 0; i < nearbyMajors.length; i++) {
       const city = nearbyMajors[i];
       const xy = refXYs[i];
       if (!xy) continue;
 
-      // Check distance from label text start position (not just the dot) to target pin
-      // Label text starts at xy[0] + labelStartOffset
-      const labelStartX = xy[0] + labelStartOffset;
-      const labelStartY = xy[1]; // Labels are vertically centered on the dot
+      const displayText = formatDisplayName(city.c);
+      const w = displayText.length * refLabelSize * 0.6;
+      const h = refLabelSize;
 
-      // Distance from label start to target pin
-      const dxT = labelStartX - targetXY[0];
-      const dyT = labelStartY - targetXY[1];
-      const distToTarget = Math.hypot(dxT, dyT);
+      const rect: Rect = {
+        x1: xy[0] - refDotR - 2,
+        y1: xy[1] - h * 0.5,
+        x2: xy[0] + refDotR + 3 + w,
+        y2: xy[1] + h * 0.5
+      };
 
-      // Also check if the dot itself is too close (for cities to the left of the pin)
-      const dotDistToTarget = Math.hypot(xy[0] - targetXY[0], xy[1] - targetXY[1]);
+      // Check collision with target
+      if (intersects(rect, targetRect)) continue;
 
-      // Reject if either the label start or the dot is too close to the target pin
-      if (distToTarget < minDistToTarget || dotDistToTarget < minDistToTarget * 0.7) continue;
-
-      // too close to any already selected label?
-      let tooClose = false;
+      // Check collision with already selected
+      let overlap = false;
       for (const s of selected) {
-        const dx = xy[0] - s.xy[0];
-        const dy = xy[1] - s.xy[1];
-        if (Math.hypot(dx, dy) < minDistBetween) {
-          tooClose = true;
+        if (intersects(rect, s.rect)) {
+          overlap = true;
           break;
         }
       }
-      if (tooClose) continue;
+      if (overlap) continue;
 
-      selected.push({ city, xy });
+      selected.push({ city, xy, rect });
       if (selected.length >= 3) break;
     }
     return selected;
-  }, [nearbyMajors, refXYs, targetXY, vbWidth, refDotR]);
+  }, [nearbyMajors, refXYs, targetXY, vbWidth, refDotR, labelSize, active, pinR, refLabelSize]);
 
   if (!location) return null;
   if (!active) {

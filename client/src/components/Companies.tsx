@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
-import { Search, Bell, Upload } from 'lucide-react';
+import { Search, Bell, Upload, Download } from 'lucide-react';
 import AlertDialog from './AlertDialog';
+import { debugLog } from '../utils/debugLogger';
 
 interface Company {
   id: number;
@@ -16,6 +17,8 @@ interface Company {
   company_size?: string;
   last_interaction?: string;
   dark_logo_bg?: boolean;
+  no_posted_jobs?: boolean;
+  no_appropriate_jobs?: boolean;
   location?: string;
   nearest_reminder?: string;
 }
@@ -78,6 +81,23 @@ export default function Companies() {
     }
   }
 
+  async function handleExportExcel() {
+    try {
+      const res = await api.get('/export/excel', { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `job-tracker-companies-export-${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      setAlertMsg({ title: 'Error', message: 'Error exporting to Excel' });
+    }
+  }
+
   const sortedCompanies = useMemo(() => {
     let result = [...companies];
 
@@ -131,8 +151,8 @@ export default function Companies() {
               gap: '0.5rem',
               padding: '0.75rem 1.5rem',
               backgroundColor: 'transparent',
-              color: '#fbbf24',
-              border: '1px solid #fbbf24',
+              color: '#34d399',
+              border: '1px solid #34d399',
               borderRadius: '6px',
               fontWeight: 'bold',
               cursor: importing ? 'not-allowed' : 'pointer',
@@ -141,6 +161,24 @@ export default function Companies() {
           >
             <Upload size={16} />
             {importing ? 'Importing…' : 'Import'}
+          </button>
+          <button
+            onClick={handleExportExcel}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem 1.5rem',
+              backgroundColor: 'transparent',
+              color: '#10b981',
+              border: '1px solid #10b981',
+              borderRadius: '6px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            <Download size={16} />
+            Export Excel
           </button>
           <button
             onClick={() => setShowAddModal(true)}
@@ -248,14 +286,47 @@ export default function Companies() {
                     }}
                     onError={(e) => {
                       (e.target as HTMLImageElement).style.display = 'none';
+                      debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
                     }}
                   />
                 </div>
               )}
               <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <h3 style={{ fontSize: '1.25rem', color: '#e5e7eb', margin: 0 }}>
-                  {company.name}
-                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <h3 style={{ fontSize: '1.25rem', color: '#e5e7eb', margin: 0 }}>
+                    {company.name}
+                  </h3>
+                  {!!company.no_posted_jobs && (
+                    <span style={{
+                      display: 'inline-flex',
+                      padding: '0.15rem 0.5rem',
+                      borderRadius: '999px',
+                      backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                      color: '#f87171',
+                      fontSize: '0.65rem',
+                      fontWeight: 600,
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      No Posted Jobs
+                    </span>
+                  )}
+                  {!!company.no_appropriate_jobs && (
+                    <span style={{
+                      display: 'inline-flex',
+                      padding: '0.15rem 0.5rem',
+                      borderRadius: '999px',
+                      backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                      color: '#fb923c',
+                      fontSize: '0.65rem',
+                      fontWeight: 600,
+                      border: '1px solid rgba(249, 115, 22, 0.3)',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      No Appropriate Jobs
+                    </span>
+                  )}
+                </div>
                 {company.nearest_reminder && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', backgroundColor: '#fbbf2420', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem', flexShrink: 0 }} title="Upcoming Reminder">
                     <Bell size={12} />

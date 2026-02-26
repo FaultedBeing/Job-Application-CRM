@@ -792,11 +792,16 @@ async function deliverDesktopNotifications(settings) {
 
     // Under threshold: show a few individual popups, but mark all as delivered
     for (const n of pending.slice(0, 5)) {
-      const notif = new Notification({
+      const options = {
         title: n.title || 'Follow-up reminder',
         body: n.message || 'Reminder due',
         silent: false
-      });
+      };
+      if (n.logo_url) {
+        options.icon = n.logo_url;
+      }
+
+      const notif = new Notification(options);
       notif.on('click', () => {
         if (mainWindow) {
           mainWindow.show();
@@ -1022,13 +1027,22 @@ function buildSummaryEmailHtml(pending, baseUrl) {
         return `
           <tr>
             <td style="padding:12px 12px;border-top:1px solid #2d3139;">
-              <div style="font-weight:700;color:#e5e7eb;margin-bottom:2px;">${who}</div>
-              <div style="color:#9ca3af;font-size:12px;margin-bottom:4px;">${msg}</div>
-              <div style="color:#6b7280;font-size:12px;">Due: ${due}</div>
-              <div style="margin-top:8px;">
-                <div style="color:#4b5563;font-size:11px;">
-                  Open in your browser:<br>
-                  <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
+              <div style="display:flex;gap:12px;align-items:flex-start;">
+                ${n.logo_url ? `
+                <div style="width:40px;height:40px;background-color:${n.icon_bg || '#1a1d24'};border-radius:6px;padding:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:1px solid #2d3139;">
+                  <img src="${escapeHtml(n.logo_url)}" style="max-width:100%;max-height:100%;object-fit:contain;">
+                </div>
+                ` : ''}
+                <div style="flex:1;">
+                  <div style="font-weight:700;color:#e5e7eb;margin-bottom:2px;">${who}</div>
+                  <div style="color:#9ca3af;font-size:12px;margin-bottom:4px;">${msg}</div>
+                  <div style="color:#6b7280;font-size:12px;">Due: ${due}</div>
+                  <div style="margin-top:8px;">
+                    <div style="color:#4b5563;font-size:11px;">
+                      Open in your browser:<br>
+                      <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
+                    </div>
+                  </div>
                 </div>
               </div>
             </td>
@@ -1186,10 +1200,24 @@ async function deliverEmailNotifications(settings) {
         <div style="background:#0f1115;color:#e5e7eb;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;padding:24px;">
           <div style="max-width:720px;margin:0 auto;">
             <div style="font-size:18px;font-weight:900;color:#fbbf24;margin-bottom:10px;">Job Application Tracker</div>
-            <div style="font-size:14px;color:#e5e7eb;font-weight:800;margin-bottom:6px;">${escapeHtml(who)}</div>
-            <div style="color:#e5e7eb;line-height:1.4;margin-bottom:4px;">${escapeHtml(n.message || '')}</div>
-            ${due ? `<div style="color:#6b7280;font-size:12px;margin-bottom:12px;">Due: ${escapeHtml(due)}</div>` : ''}
-            <div style="color:#4b5563;font-size:11px;margin-top:8px;">
+            
+            <div style="display:flex;gap:16px;align-items:center;margin-bottom:16px;">
+              ${n.logo_url ? `
+              <div style="width:48px;height:48px;background-color:${n.icon_bg || '#1a1d24'};border-radius:8px;padding:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:1px solid #2d3139;">
+                <img src="${escapeHtml(n.logo_url)}" style="max-width:100%;max-height:100%;object-fit:contain;">
+              </div>
+              ` : ''}
+              <div>
+                <div style="font-size:16px;color:#e5e7eb;font-weight:800;margin-bottom:2px;">${escapeHtml(who)}</div>
+                ${due ? `<div style="color:#6b7280;font-size:12px;">Due: ${escapeHtml(due)}</div>` : ''}
+              </div>
+            </div>
+
+            <div style="color:#e5e7eb;line-height:1.4;margin-bottom:12px;padding:12px;background:#1a1d24;border-radius:8px;border:1px solid #2d3139;">
+              ${escapeHtml(n.message || '')}
+            </div>
+
+            <div style="color:#4b5563;font-size:11px;margin-top:16px;">
               Open in your browser:<br>
               <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
             </div>
@@ -1467,74 +1495,6 @@ function startServer() {
   });
 }
 
-// --- Download progress overlay (injected into renderer) ---
-function showDownloadOverlay(version) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.executeJavaScript(`
-    (function() {
-      // Remove any existing overlay
-      var old = document.getElementById('update-download-overlay');
-      if (old) old.remove();
-
-      var overlay = document.createElement('div');
-      overlay.id = 'update-download-overlay';
-      overlay.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:99999;background:#1a1d24;border:1px solid #2d3139;border-radius:12px;padding:20px 24px;min-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.5);font-family:system-ui,-apple-system,sans-serif;color:#e5e7eb;';
-
-      overlay.innerHTML = 
-        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">' +
-          '<div id="update-spinner" style="width:18px;height:18px;border-radius:50%;border:2px solid #374151;border-top-color:#fbbf24;animation:updSpin 0.8s linear infinite;flex-shrink:0;"></div>' +
-          '<span style="font-weight:600;font-size:0.95rem;">Downloading v${version}...</span>' +
-        '</div>' +
-        '<div style="background:#111827;border-radius:999px;height:8px;overflow:hidden;border:1px solid #1f2937;margin-bottom:8px;">' +
-          '<div id="update-bar" style="height:100%;width:0%;background:linear-gradient(to right,#fbbf24,#22c55e);transition:width 0.3s ease-out;border-radius:999px;"></div>' +
-        '</div>' +
-        '<div style="display:flex;justify-content:space-between;font-size:0.8rem;color:#9ca3af;">' +
-          '<span id="update-percent">0%</span>' +
-          '<span id="update-speed"></span>' +
-        '</div>';
-
-      // Add spinner animation
-      var style = document.createElement('style');
-      style.id = 'update-download-style';
-      style.textContent = '@keyframes updSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}';
-      document.head.appendChild(style);
-      document.body.appendChild(overlay);
-    })();
-  `).catch(() => { });
-}
-
-function updateDownloadOverlay(percent, bytesPerSecond, transferred, total) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const pct = Math.round(percent);
-  const speed = bytesPerSecond > 1048576
-    ? (bytesPerSecond / 1048576).toFixed(1) + ' MB/s'
-    : (bytesPerSecond / 1024).toFixed(0) + ' KB/s';
-  const dlMB = (transferred / 1048576).toFixed(1);
-  const totalMB = (total / 1048576).toFixed(1);
-
-  mainWindow.webContents.executeJavaScript(`
-    (function() {
-      var bar = document.getElementById('update-bar');
-      var pctEl = document.getElementById('update-percent');
-      var speedEl = document.getElementById('update-speed');
-      if (bar) bar.style.width = '${pct}%';
-      if (pctEl) pctEl.textContent = '${pct}%  (${dlMB} / ${totalMB} MB)';
-      if (speedEl) speedEl.textContent = '${speed}';
-    })();
-  `).catch(() => { });
-}
-
-function removeDownloadOverlay() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.executeJavaScript(`
-    (function() {
-      var el = document.getElementById('update-download-overlay');
-      if (el) el.remove();
-      var st = document.getElementById('update-download-style');
-      if (st) st.remove();
-    })();
-  `).catch(() => { });
-}
 
 // Auto-updater event handlers
 function setupAutoUpdater() {
@@ -1565,22 +1525,8 @@ function setupAutoUpdater() {
 
   autoUpdater.on('update-available', (info) => {
     console.log('[Auto-updater] Update available:', info.version);
-    isManualUpdateCheck = false; // Reset flag, we're showing a dialog regardless
     if (mainWindow) {
-      showThemedDialog({
-        type: 'info',
-        title: 'Update Available',
-        message: `A new version (v${info.version}) is available!`,
-        detail: `You are currently running v${app.getVersion()}.\n\nWould you like to download and install it now?`,
-        buttons: ['Download Now', 'Later'],
-        defaultId: 0
-      }).then((result) => {
-        if (result.response === 0) {
-          isDownloadInProgress = true;
-          showDownloadOverlay(info.version);
-          autoUpdater.downloadUpdate();
-        }
-      });
+      mainWindow.webContents.send('update-available', info);
     }
   });
 
@@ -1602,110 +1548,21 @@ function setupAutoUpdater() {
   autoUpdater.on('error', (err) => {
     const errMsg = err.message || err.toString() || '';
     console.error('[Auto-updater] Error:', errMsg);
-
-    // Clean up any download UI
-    const wasDownloading = isDownloadInProgress;
-    isDownloadInProgress = false;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setProgressBar(-1);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-error', errMsg);
     }
-    removeDownloadOverlay();
-
-    // Show error dialog if user explicitly triggered the check OR a download was in progress
-    if ((isManualUpdateCheck || wasDownloading) && mainWindow) {
-      let title = 'Update Check';
-      let message = 'Could not check for updates.';
-      let detail = '';
-
-      if (wasDownloading) {
-        title = 'Download Failed';
-        message = 'The update download failed.';
-        detail = 'An error occurred while downloading the update.\n\nPlease try again later.\n\n' +
-          `Error: ${errMsg}`;
-      } else if (errMsg.includes('net::ERR_INTERNET_DISCONNECTED') ||
-        errMsg.includes('ENOTFOUND') ||
-        errMsg.includes('ECONNREFUSED') ||
-        errMsg.includes('getaddrinfo')) {
-        message = 'No internet connection.';
-        detail = 'Please check your internet connection and try again.';
-      } else if (errMsg.includes('404') || errMsg.includes('Not Found') ||
-        errMsg.includes('406') || errMsg.includes('Not Acceptable') ||
-        errMsg.includes('Unable to find latest version') ||
-        errMsg.includes('HttpError')) {
-        message = 'No published updates found.';
-        detail = 'No compatible release was found on GitHub.\n\n' +
-          'This usually means the release is missing the required latest.yml file, ' +
-          'or no full releases have been published yet.\n\n' +
-          `Current version: v${app.getVersion()}`;
-      } else {
-        message = 'Update check failed.';
-        detail = 'An unexpected error occurred while checking for updates.\n\n' +
-          'You can continue using the app normally.\n\n' +
-          `Error: ${errMsg}`;
-      }
-
-      showThemedDialog({
-        type: 'warning',
-        title: title,
-        message: message,
-        detail: detail,
-        buttons: ['OK'],
-        defaultId: 0
-      });
-    }
-    isManualUpdateCheck = false;
   });
 
   autoUpdater.on('download-progress', (progressObj) => {
-    const percent = progressObj.percent.toFixed(1);
-    console.log(`[Auto-updater] Download: ${percent}% (${progressObj.transferred}/${progressObj.total})`);
-
-    // Update the Windows taskbar progress bar
     if (mainWindow) {
-      mainWindow.setProgressBar(progressObj.percent / 100);
+      mainWindow.webContents.send('download-progress', progressObj);
     }
-
-    // Update the in-app download overlay
-    updateDownloadOverlay(progressObj.percent, progressObj.bytesPerSecond, progressObj.transferred, progressObj.total);
   });
 
   autoUpdater.on('update-downloaded', (info) => {
     console.log('[Auto-updater] Update downloaded:', info.version);
-    isDownloadInProgress = false;
-
-    // Clear taskbar progress and remove overlay
     if (mainWindow) {
-      mainWindow.setProgressBar(-1);
-      removeDownloadOverlay();
-
-      // Small delay to let the overlay removal complete before showing the dialog
-      setTimeout(() => {
-        showThemedDialog({
-          type: 'info',
-          title: 'Update Ready',
-          message: 'Update downloaded successfully!',
-          detail: `Version v${info.version} is ready to install.\nThe application will restart to apply the update.`,
-          buttons: ['Restart Now', 'Later'],
-          defaultId: 0
-        }).then((result) => {
-          if (result.response === 0) {
-            // Kill server process first to release all file locks
-            if (serverProcess) {
-              try {
-                serverProcess.kill('SIGTERM');
-                serverProcess = null;
-              } catch (e) {
-                console.error('Error killing server before update:', e);
-              }
-            }
-            // Give the server a moment to fully shut down, then install
-            setTimeout(() => {
-              isQuitting = true;
-              autoUpdater.quitAndInstall(true, true);
-            }, 1000);
-          }
-        });
-      }, 500);
+      mainWindow.webContents.send('update-downloaded', info);
     }
   });
 
@@ -1808,6 +1665,27 @@ ipcMain.handle('check-for-updates', async () => {
     console.error('[Auto-updater] Failed to reload prerelease setting:', e);
   }
   checkForUpdates(true);
+});
+
+ipcMain.on('download-update', () => {
+  autoUpdater.downloadUpdate();
+});
+
+ipcMain.on('quit-and-install', () => {
+  // Kill server process first to release all file locks
+  if (serverProcess) {
+    try {
+      serverProcess.kill('SIGTERM');
+      serverProcess = null;
+    } catch (e) {
+      console.error('Error killing server before update:', e);
+    }
+  }
+  // Give the server a moment to fully shut down, then install
+  setTimeout(() => {
+    isQuitting = true;
+    autoUpdater.quitAndInstall(true, true);
+  }, 1000);
 });
 
 // Check for updates periodically
