@@ -116,6 +116,17 @@ export default function NotificationHub() {
     }
   }
 
+  async function dismissAll() {
+    try {
+      await api.post('/notifications/dismiss-all');
+      setItems([]);
+      setUnread(0);
+      window.dispatchEvent(new CustomEvent('notifications-updated'));
+    } catch (_e) {
+      // ignore
+    }
+  }
+
   async function openNotification(n: NotificationItem) {
     await markRead(n.id);
     setOpen(false);
@@ -206,13 +217,23 @@ export default function NotificationHub() {
                   {unread > 0 ? `${unread} unread` : 'All caught up'}
                 </div>
               </div>
-              <button
-                onClick={() => setOpen(false)}
-                style={{ backgroundColor: 'transparent', border: 'none', color: '#9ca3af', cursor: 'pointer' }}
-                aria-label="Close notifications"
-              >
-                <X size={18} />
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                {items.length > 0 && (
+                  <button
+                    onClick={dismissAll}
+                    style={{ backgroundColor: 'transparent', border: '1px solid #2d3139', borderRadius: '6px', color: '#9ca3af', padding: '0.25rem 0.5rem', fontSize: '0.8rem', cursor: 'pointer' }}
+                  >
+                    Clear All
+                  </button>
+                )}
+                <button
+                  onClick={() => setOpen(false)}
+                  style={{ backgroundColor: 'transparent', border: 'none', color: '#9ca3af', cursor: 'pointer' }}
+                  aria-label="Close notifications"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.25rem' }}>

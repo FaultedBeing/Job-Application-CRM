@@ -1026,12 +1026,8 @@ function buildSummaryEmailHtml(pending, baseUrl) {
               <div style="color:#9ca3af;font-size:12px;margin-bottom:4px;">${msg}</div>
               <div style="color:#6b7280;font-size:12px;">Due: ${due}</div>
               <div style="margin-top:8px;">
-                <div style="color:#6b7280;font-size:12px;margin-bottom:8px;">
-                  Open in app by clicking the link below:<br>
-                  <a href="${escapeHtml(deepLink)}" style="color:#3b82f6;text-decoration:underline;word-break:break-all;">${escapeHtml(deepLink)}</a>
-                </div>
-                <div style="color:#4b5563;font-size:11px;margin-top:4px;">
-                  If that doesn't work, open in your browser:<br>
+                <div style="color:#4b5563;font-size:11px;">
+                  Open in your browser:<br>
                   <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
                 </div>
               </div>
@@ -1080,8 +1076,7 @@ function buildSummaryEmailText(pending, baseUrl) {
     const who = primaryLabel(n);
     const due = n.due_at ? formatDueNoSeconds(n.due_at) : '';
     const httpLink = n.link_path ? `${baseUrl}${n.link_path}` : `${baseUrl}/?notifications=1`;
-    const deepLink = n.link_path ? `jobtracker://open?path=${encodeURIComponent(n.link_path)}` : 'jobtracker://open';
-    return `- ${who}: ${n.message}${due ? ` (due ${due})` : ''}\n  Open in app: ${deepLink}\n  Or in browser: ${httpLink}`;
+    return `- ${who}: ${n.message}${due ? ` (due ${due})` : ''}\n  View in browser: ${httpLink}`;
   });
   return lines.join('\n\n');
 }
@@ -1194,12 +1189,8 @@ async function deliverEmailNotifications(settings) {
             <div style="font-size:14px;color:#e5e7eb;font-weight:800;margin-bottom:6px;">${escapeHtml(who)}</div>
             <div style="color:#e5e7eb;line-height:1.4;margin-bottom:4px;">${escapeHtml(n.message || '')}</div>
             ${due ? `<div style="color:#6b7280;font-size:12px;margin-bottom:12px;">Due: ${escapeHtml(due)}</div>` : ''}
-            <div style="color:#6b7280;font-size:12px;margin-bottom:8px;">
-              Open in app by clicking the link below:<br>
-              <a href="${escapeHtml(deepLink)}" style="color:#3b82f6;text-decoration:underline;word-break:break-all;">${escapeHtml(deepLink)}</a>
-            </div>
             <div style="color:#4b5563;font-size:11px;margin-top:8px;">
-              If that doesn't work, open in your browser:<br>
+              Open in your browser:<br>
               <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
             </div>
           </div>

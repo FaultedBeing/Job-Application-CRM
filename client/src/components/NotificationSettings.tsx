@@ -32,10 +32,25 @@ export default function NotificationSettings() {
   // Thresholds
   const [desktopSummaryThreshold, setDesktopSummaryThreshold] = useState(5);
   const [emailSummaryThreshold, setEmailSummaryThreshold] = useState(5);
+  const [initialLoaded, setInitialLoaded] = useState(false);
 
   useEffect(() => {
-    loadSettings();
+    loadSettings().then(() => setInitialLoaded(true));
   }, []);
+
+  // Auto-save logic
+  useEffect(() => {
+    if (!initialLoaded) return;
+    const timer = setTimeout(() => {
+      saveAll();
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [
+    gmailClientId, gmailClientSecret, gmailEnabled, gmailRecipient,
+    emailProvider, smtpEnabled, smtpHost, smtpPort, smtpUser, smtpPass,
+    smtpFrom, smtpSecure, smtpRecipient, desktopSummaryThreshold,
+    emailSummaryThreshold, initialLoaded
+  ]);
 
   function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
     setToast({ message, type });
@@ -426,8 +441,8 @@ export default function NotificationSettings() {
         </div>
       </section>
 
-      {/* Save */}
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
+      {/* Save (Manual trigger if needed) */}
+      <div style={{ display: 'none', gap: '1rem', marginBottom: '2rem' }}>
         <button onClick={saveAll} style={{ padding: '0.75rem 1.5rem', backgroundColor: '#fbbf24', border: 'none', borderRadius: '6px', color: '#0f1115', fontWeight: 'bold', cursor: 'pointer' }}>
           Save Notification Settings
         </button>

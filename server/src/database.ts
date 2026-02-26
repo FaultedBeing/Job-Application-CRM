@@ -232,8 +232,8 @@ export class Database {
       )
     `);
 
-    // Ensure single reminder per (entity_type, entity_id, source)
-    await this.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_unique ON reminders(entity_type, entity_id, source)`);
+    // ALLOW multiple reminders (drop the old unique index if it exists)
+    await this.run(`DROP INDEX IF EXISTS idx_reminders_unique`);
 
     // Migrations for reminders channel flags
     await this.run(`ALTER TABLE reminders ADD COLUMN notify_desktop INTEGER DEFAULT 1`);
@@ -400,11 +400,32 @@ export class Database {
   }
 
   async getCompanyJobs(companyId: number) {
-    return await this.all('SELECT * FROM jobs WHERE company_id = ? ORDER BY created_at DESC', [companyId]);
+    return await this.all(`
+      SELECT 
+        j.*,
+        (
+          SELECT MIN(r.due_at) FROM reminders r 
+          WHERE r.entity_type = 'job' AND r.entity_id = j.id AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
+        ) as nearest_reminder
+      FROM jobs j
+      WHERE j.company_id = ? 
+      ORDER BY j.created_at DESC
+    `, [companyId]);
   }
 
   async getCompanyContacts(companyId: number) {
-    return await this.all('SELECT * FROM contacts WHERE company_id = ? ORDER BY last_interaction DESC', [companyId]);
+    return await this.all(`
+      SELECT 
+        c.*,
+        (
+          SELECT MIN(r.due_at) FROM reminders r 
+          WHERE ((r.entity_type = 'contact' AND r.entity_id = c.id) OR (r.contact_id = c.id))
+          AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
+        ) as nearest_reminder
+      FROM contacts c
+      WHERE c.company_id = ? 
+      ORDER BY c.last_interaction DESC
+    `, [companyId]);
   }
 
   async createCompany(data: any) {
@@ -603,18 +624,26 @@ export class Database {
   }
 
   async getJobContacts(jobId: number) {
-    // Get contacts directly linked to job, plus company-level contacts (not job-specific)
     const job = await this.getJob(jobId);
-    const jobContacts = await this.all('SELECT * FROM contacts WHERE job_id = ?', [jobId]);
+    if (!job) return [];
 
-    if (job?.company_id) {
-      // Get company-level contacts (where company_id is set but job_id is NULL)
-      const companyContacts = await this.all('SELECT * FROM contacts WHERE company_id = ? AND job_id IS NULL',
-        [job.company_id]);
-      return [...jobContacts, ...companyContacts];
-    }
+    // Query both job-specific contacts and company-level contacts in one go
+    // Note: We filter contacts belonging to the same company if it's a job-level view
+    const companyId = job.company_id;
 
-    return jobContacts;
+    return await this.all(`
+      SELECT 
+        c.*,
+        (
+          SELECT MIN(r.due_at) FROM reminders r 
+          WHERE ((r.entity_type = 'contact' AND r.entity_id = c.id) OR (r.contact_id = c.id))
+          AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
+        ) as nearest_reminder
+      FROM contacts c
+      WHERE c.job_id = ? 
+      OR (c.company_id = ? AND c.job_id IS NULL)
+      ORDER BY c.last_interaction DESC
+    `, [jobId, companyId || -1]);
   }
 
   async createContact(data: any) {
@@ -826,25 +855,39 @@ export class Database {
     notify_email?: boolean;
     contact_id?: number;
   }) {
-    await this.run(
-      `INSERT OR REPLACE INTO reminders (id, entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, contact_id, sent_at, updated_at)
-       VALUES (
-         (SELECT id FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ?),
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP
-       )`,
-      [
-        rem.entity_type, rem.entity_id, rem.source,
-        rem.entity_type,
-        rem.entity_id,
-        rem.source,
-        rem.due_at,
-        rem.message,
-        rem.link_path || null,
-        rem.notify_desktop === undefined ? 1 : rem.notify_desktop ? 1 : 0,
-        rem.notify_email === undefined ? 0 : rem.notify_email ? 1 : 0,
-        rem.contact_id || null
-      ]
-    );
+    if (rem.source === 'manual') {
+      await this.run(
+        `INSERT INTO reminders (entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, contact_id, sent_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP)`,
+        [
+          rem.entity_type, rem.entity_id, rem.source,
+          rem.due_at, rem.message, rem.link_path || null,
+          rem.notify_desktop === undefined ? 1 : rem.notify_desktop ? 1 : 0,
+          rem.notify_email === undefined ? 0 : rem.notify_email ? 1 : 0,
+          rem.contact_id || null
+        ]
+      );
+    } else {
+      await this.run(
+        `INSERT OR REPLACE INTO reminders (id, entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, contact_id, sent_at, updated_at)
+         VALUES (
+           (SELECT id FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ?),
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP
+         )`,
+        [
+          rem.entity_type, rem.entity_id, rem.source,
+          rem.entity_type,
+          rem.entity_id,
+          rem.source,
+          rem.due_at,
+          rem.message,
+          rem.link_path || null,
+          rem.notify_desktop === undefined ? 1 : rem.notify_desktop ? 1 : 0,
+          rem.notify_email === undefined ? 0 : rem.notify_email ? 1 : 0,
+          rem.contact_id || null
+        ]
+      );
+    }
   }
 
   private async deleteReminderByEntity(entityType: string, entityId: number, source?: string) {
@@ -898,7 +941,7 @@ export class Database {
     await this.upsertReminder({
       entity_type: 'job',
       entity_id: jobId,
-      source: 'follow_up',
+      source: 'manual', // Use 'manual' to allow stacking
       due_at: dueAt,
       message,
       link_path: `/job/${jobId}`,
@@ -907,9 +950,7 @@ export class Database {
       contact_id: opts?.contact_id
     });
 
-    // update the contact's interaction if a contact_id is provided? Actually, no need.
-    // just return the created reminder.
-    return await this.get('SELECT * FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ?', ['job', jobId, 'follow_up']);
+    return await this.get('SELECT * FROM reminders WHERE rowid = last_insert_rowid()');
   }
 
   async getJobReminders(jobId: number) {
@@ -946,7 +987,7 @@ export class Database {
       notify_email: opts?.notify_email ?? false,
       contact_id: opts?.contact_id || contactId
     });
-    return await this.get('SELECT * FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ?', ['contact', contactId, 'manual']);
+    return await this.get('SELECT * FROM reminders WHERE rowid = last_insert_rowid()');
   }
 
   async getDueReminders(nowIso: string) {
@@ -1028,6 +1069,10 @@ export class Database {
   async dismissNotification(id: number) {
     await this.run('UPDATE notifications SET dismissed_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
     return await this.get('SELECT * FROM notifications WHERE id = ?', [id]);
+  }
+
+  async dismissAllNotifications() {
+    await this.run('UPDATE notifications SET dismissed_at = CURRENT_TIMESTAMP WHERE dismissed_at IS NULL');
   }
 
   async getPendingDelivery(channel: 'desktop' | 'email', nowIso: string, limit = 50) {

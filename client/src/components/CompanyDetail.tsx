@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api';
-import { ArrowLeft, Plus, Edit, Trash2, Sun } from 'lucide-react';
+import { ArrowLeft, Plus, Edit, Trash2, Sun, Bell } from 'lucide-react';
+import ConfirmDialog from './ConfirmDialog';
+import AlertDialog from './AlertDialog';
 
 interface Company {
   id: number;
@@ -90,6 +92,7 @@ interface Job {
   status: string;
   excitement_score: number;
   fit_score: number;
+  nearest_reminder?: string;
 }
 
 interface Contact {
@@ -99,6 +102,7 @@ interface Contact {
   email: string;
   phone?: string;
   linkedin_url?: string;
+  nearest_reminder?: string;
 }
 
 export default function CompanyDetail() {
@@ -111,6 +115,8 @@ export default function CompanyDetail() {
   const [showAddJob, setShowAddJob] = useState(false);
   const [editing, setEditing] = useState(false);
   const [notesDraft, setNotesDraft] = useState('');
+  const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+  const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
 
   function formatWebsiteDisplay(url?: string | null) {
     if (!url) return '';
@@ -166,22 +172,27 @@ export default function CompanyDetail() {
       setNotesDraft(res.data.notes || '');
     } catch (error) {
       console.error('Error saving notes:', error);
-      alert('Error saving notes');
+      setAlertMsg({ title: 'Error', message: 'Error saving notes' });
       setNotesDraft(company.notes || '');
     }
   }
 
-  async function handleDeleteCompany() {
+  function handleDeleteCompany() {
     if (!company) return;
-    if (!confirm('Delete this company? Jobs, contacts, and interactions will remain but will be unlinked from this company.')) return;
-
-    try {
-      await api.delete(`/companies/${company.id}`);
-      navigate('/companies');
-    } catch (error) {
-      console.error('Error deleting company:', error);
-      alert('Error deleting company');
-    }
+    setPendingConfirm({
+      title: 'Delete company',
+      message: 'Delete this company? Jobs, contacts, and interactions will remain but will be unlinked from this company.',
+      onConfirm: async () => {
+        setPendingConfirm(null);
+        try {
+          await api.delete(`/companies/${company.id}`);
+          navigate('/companies');
+        } catch (error) {
+          console.error('Error deleting company:', error);
+          setAlertMsg({ title: 'Error', message: 'Error deleting company' });
+        }
+      }
+    });
   }
 
   // Website is edited via the Edit Company form; no separate inline edit button here.
@@ -207,7 +218,7 @@ export default function CompanyDetail() {
       loadData();
     } catch (error) {
       console.error('Error updating company:', error);
-      alert('Error updating company');
+      setAlertMsg({ title: 'Error', message: 'Error updating company' });
     }
   }
 
@@ -278,250 +289,278 @@ export default function CompanyDetail() {
       ) : (
         <>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
-        {company.logo_url && (
-          <div style={{ display: 'inline-block' }}>
-            <img
-              src={company.logo_url}
-              alt={`${company.name} logo`}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+            {company.logo_url && (
+              <div style={{ display: 'inline-block' }}>
+                <img
+                  src={company.logo_url}
+                  alt={`${company.name} logo`}
+                  style={{
+                    width: '60px',
+                    height: '60px',
+                    objectFit: 'contain',
+                    backgroundColor: company.dark_logo_bg ? '#e5e7eb' : '#0f1115',
+                    padding: '8px',
+                    borderRadius: '8px',
+                    transition: 'background-color 0.2s ease'
+                  }}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              </div>
+            )}
+            <div>
+              <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', color: '#fbbf24' }}>{company.name}</h1>
+              {company.industry && (
+                <p style={{ color: '#9ca3af', marginBottom: '0.5rem' }}>{company.industry}</p>
+              )}
+              {company.location && (
+                <p style={{ color: '#9ca3af', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                  Based out of: <span style={{ color: '#e5e7eb' }}>{company.location}</span>
+                </p>
+              )}
+              {(company.employee_count || company.company_size) && (
+                <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>
+                  {company.company_size || `${company.employee_count} employees`}
+                </p>
+              )}
+            </div>
+          </div>
+          <div style={{ marginBottom: '2rem' }}>
+            {company.website ? (
+              <a
+                href={getWebsiteHref(company.website)}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: '#3b82f6' }}
+              >
+                {formatWebsiteDisplay(company.website)}
+              </a>
+            ) : (
+              <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>No website set</span>
+            )}
+          </div>
+
+          <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
+            <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>Notes</h2>
+            <textarea
+              value={notesDraft}
+              onChange={(e) => setNotesDraft(e.target.value)}
+              onBlur={handleSaveNotes}
+              placeholder="Click here to add notes about this company..."
               style={{
-                width: '60px',
-                height: '60px',
-                objectFit: 'contain',
-                backgroundColor: company.dark_logo_bg ? '#e5e7eb' : '#0f1115',
-                padding: '8px',
-                borderRadius: '8px',
-                transition: 'background-color 0.2s ease'
-              }}
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = 'none';
+                width: '100%',
+                padding: '0.75rem',
+                backgroundColor: '#0f1115',
+                border: '1px solid #2d3139',
+                borderRadius: '6px',
+                color: '#e5e7eb',
+                minHeight: '100px',
+                resize: 'vertical'
               }}
             />
+            <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.5rem' }}>Notes save automatically when you click away.</p>
           </div>
-        )}
-        <div>
-          <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', color: '#fbbf24' }}>{company.name}</h1>
-          {company.industry && (
-            <p style={{ color: '#9ca3af', marginBottom: '0.5rem' }}>{company.industry}</p>
-          )}
-          {company.location && (
-            <p style={{ color: '#9ca3af', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-              Based out of: <span style={{ color: '#e5e7eb' }}>{company.location}</span>
-            </p>
-          )}
-          {(company.employee_count || company.company_size) && (
-            <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>
-              {company.company_size || `${company.employee_count} employees`}
-            </p>
-          )}
-        </div>
-      </div>
-      <div style={{ marginBottom: '2rem' }}>
-        {company.website ? (
-          <a
-            href={getWebsiteHref(company.website)}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: '#3b82f6' }}
-          >
-            {formatWebsiteDisplay(company.website)}
-          </a>
-        ) : (
-          <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>No website set</span>
-        )}
-      </div>
 
-      <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
-        <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>Notes</h2>
-        <textarea
-          value={notesDraft}
-          onChange={(e) => setNotesDraft(e.target.value)}
-          onBlur={handleSaveNotes}
-          placeholder="Click here to add notes about this company..."
-          style={{
-            width: '100%',
-            padding: '0.75rem',
-            backgroundColor: '#0f1115',
-            border: '1px solid #2d3139',
-            borderRadius: '6px',
-            color: '#e5e7eb',
-            minHeight: '100px',
-            resize: 'vertical'
-          }}
-        />
-        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.5rem' }}>Notes save automatically when you click away.</p>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-        {/* Jobs */}
-        <section>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h2 style={{ fontSize: '1.25rem', color: '#e5e7eb' }}>
-              Jobs ({jobs.length})
-            </h2>
-            <button
-              onClick={() => setShowAddJob(true)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.5rem 1rem',
-                backgroundColor: '#fbbf24',
-                border: 'none',
-                borderRadius: '6px',
-                color: '#0f1115',
-                cursor: 'pointer'
-              }}
-            >
-              <Plus size={16} />
-              Add Job
-            </button>
-          </div>
-          <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1rem' }}>
-            {jobs.length === 0 ? (
-              <p style={{ color: '#9ca3af' }}>No jobs at this company yet.</p>
-            ) : (
-              jobs.map((job) => (
-                <Link
-                  key={job.id}
-                  to={`/job/${job.id}`}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+            {/* Jobs */}
+            <section>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h2 style={{ fontSize: '1.25rem', color: '#e5e7eb' }}>
+                  Jobs ({jobs.length})
+                </h2>
+                <button
+                  onClick={() => setShowAddJob(true)}
                   style={{
-                    display: 'block',
-                    padding: '1rem',
-                    marginBottom: '0.5rem',
-                    backgroundColor: '#0f1115',
-                    borderRadius: '6px',
-                    textDecoration: 'none',
-                    color: 'inherit',
-                    border: '1px solid #2d3139'
-                  }}
-                >
-                  <h3 style={{ color: '#e5e7eb', marginBottom: '0.25rem' }}>{job.title}</h3>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: '#9ca3af', fontSize: '0.875rem' }}>
-                      {job.status}
-                      {job.location ? <span style={{ color: '#6b7280' }}> • {job.location}</span> : null}
-                    </span>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <span style={{ color: '#fbbf24' }}>★ {job.excitement_score}</span>
-                      <span style={{ color: '#34d399' }}>● {job.fit_score}</span>
-                    </div>
-                  </div>
-                </Link>
-              ))
-            )}
-          </div>
-        </section>
-
-        {/* Contacts */}
-        <section>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h2 style={{ fontSize: '1.25rem', color: '#e5e7eb' }}>
-              Contacts ({contacts.length})
-            </h2>
-            <button
-              onClick={() => setShowAddContact(true)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.5rem 1rem',
-                backgroundColor: '#fbbf24',
-                border: 'none',
-                borderRadius: '6px',
-                color: '#0f1115',
-                cursor: 'pointer'
-              }}
-            >
-              <Plus size={16} />
-              Add Contact
-            </button>
-          </div>
-          <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1rem' }}>
-            {contacts.length === 0 ? (
-              <p style={{ color: '#9ca3af' }}>No contacts at this company yet.</p>
-            ) : (
-              contacts.map((contact) => (
-                <div
-                  key={contact.id}
-                  style={{
-                    padding: '1rem',
-                    marginBottom: '0.5rem',
-                    backgroundColor: '#0f1115',
-                    borderRadius: '6px',
-                    border: '1px solid #2d3139',
                     display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: '0.75rem'
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.5rem 1rem',
+                    backgroundColor: '#fbbf24',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#0f1115',
+                    cursor: 'pointer'
                   }}
                 >
-                  <div>
-                    <p style={{ fontWeight: 'bold' }}>
-                      <Link
-                        to={`/contacts/${contact.id}`}
-                        style={{ color: '#e5e7eb', textDecoration: 'none' }}
-                      >
-                        {contact.name}
-                      </Link>
-                    </p>
-                    {contact.role && <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{contact.role}</p>}
-                    {contact.email && (
-                      <a href={`mailto:${contact.email}`} style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}>
-                        {contact.email}
-                      </a>
-                    )}
-                    {contact.phone && <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{contact.phone}</p>}
-                    {contact.linkedin_url && (
-                      <a
-                        href={contact.linkedin_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}
-                      >
-                        LinkedIn Profile
-                      </a>
-                    )}
-                  </div>
-                  {/* Contact deletion is managed from the Contacts page only */}
-                </div>
-              ))
-            )}
+                  <Plus size={16} />
+                  Add Job
+                </button>
+              </div>
+              <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1rem' }}>
+                {jobs.length === 0 ? (
+                  <p style={{ color: '#9ca3af' }}>No jobs at this company yet.</p>
+                ) : (
+                  jobs.map((job) => (
+                    <Link
+                      key={job.id}
+                      to={`/job/${job.id}`}
+                      style={{
+                        display: 'block',
+                        padding: '1rem',
+                        marginBottom: '0.5rem',
+                        backgroundColor: '#0f1115',
+                        borderRadius: '6px',
+                        textDecoration: 'none',
+                        color: 'inherit',
+                        border: '1px solid #2d3139',
+                        position: 'relative'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                        <h3 style={{ color: '#e5e7eb', marginBottom: '0.25rem' }}>{job.title}</h3>
+                        {job.nearest_reminder && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', fontSize: '0.7rem', backgroundColor: '#1a1d24', padding: '2px 6px', borderRadius: '4px', border: '1px solid #2d3139' }}>
+                            <Bell size={10} />
+                            {new Date(job.nearest_reminder).toLocaleDateString()}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: '#9ca3af', fontSize: '0.875rem' }}>
+                          {job.status}
+                          {job.location ? <span style={{ color: '#6b7280' }}> • {job.location}</span> : null}
+                        </span>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <span style={{ color: '#fbbf24' }}>★ {job.excitement_score}</span>
+                          <span style={{ color: '#34d399' }}>● {job.fit_score}</span>
+                        </div>
+                      </div>
+                    </Link>
+                  ))
+                )}
+              </div>
+            </section>
+
+            {/* Contacts */}
+            <section>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h2 style={{ fontSize: '1.25rem', color: '#e5e7eb' }}>
+                  Contacts ({contacts.length})
+                </h2>
+                <button
+                  onClick={() => setShowAddContact(true)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.5rem 1rem',
+                    backgroundColor: '#fbbf24',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#0f1115',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Plus size={16} />
+                  Add Contact
+                </button>
+              </div>
+              <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1rem' }}>
+                {contacts.length === 0 ? (
+                  <p style={{ color: '#9ca3af' }}>No contacts at this company yet.</p>
+                ) : (
+                  contacts.map((contact) => (
+                    <div
+                      key={contact.id}
+                      style={{
+                        padding: '1rem',
+                        marginBottom: '0.5rem',
+                        backgroundColor: '#0f1115',
+                        borderRadius: '6px',
+                        border: '1px solid #2d3139',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: '0.75rem'
+                      }}
+                    >
+                      <div>
+                        <p style={{ fontWeight: 'bold' }}>
+                          <Link
+                            to={`/contacts/${contact.id}`}
+                            style={{ color: '#e5e7eb', textDecoration: 'none' }}
+                          >
+                            {contact.name}
+                          </Link>
+                        </p>
+                        {contact.nearest_reminder && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
+                            <Bell size={12} />
+                            Reminder: {new Date(contact.nearest_reminder).toLocaleDateString()}
+                          </div>
+                        )}
+                        {contact.role && <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{contact.role}</p>}
+                        {contact.email && (
+                          <a href={`mailto:${contact.email}`} style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}>
+                            {contact.email}
+                          </a>
+                        )}
+                        {contact.phone && <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{contact.phone}</p>}
+                        {contact.linkedin_url && (
+                          <a
+                            href={contact.linkedin_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}
+                          >
+                            LinkedIn Profile
+                          </a>
+                        )}
+                      </div>
+                      {/* Contact deletion is managed from the Contacts page only */}
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
           </div>
-        </section>
-      </div>
 
-      {showAddJob && (
-        <AddJobModal
-          companyName={company.name}
-          onClose={() => setShowAddJob(false)}
-          onSave={async (data) => {
-            try {
-              await api.post('/jobs', { ...data, company_id: parseInt(id!), company_name: company.name });
-              setShowAddJob(false);
-              loadData();
-            } catch (error) {
-              console.error('Error adding job:', error);
-            }
-          }}
-        />
-      )}
+          {showAddJob && (
+            <AddJobModal
+              companyName={company.name}
+              onClose={() => setShowAddJob(false)}
+              onSave={async (data) => {
+                try {
+                  await api.post('/jobs', { ...data, company_id: parseInt(id!), company_name: company.name });
+                  setShowAddJob(false);
+                  loadData();
+                } catch (error) {
+                  console.error('Error adding job:', error);
+                }
+              }}
+            />
+          )}
 
-      {showAddContact && (
-        <AddContactModal
-          onClose={() => setShowAddContact(false)}
-          onSave={async (data) => {
-            try {
-              await api.post('/contacts', { ...data, company_id: parseInt(id!) });
-              setShowAddContact(false);
-              loadData();
-            } catch (error) {
-              console.error('Error adding contact:', error);
-            }
-          }}
-        />
-      )}
+          {showAddContact && (
+            <AddContactModal
+              onClose={() => setShowAddContact(false)}
+              onSave={async (data) => {
+                try {
+                  await api.post('/contacts', { ...data, company_id: parseInt(id!) });
+                  setShowAddContact(false);
+                  loadData();
+                } catch (error) {
+                  console.error('Error adding contact:', error);
+                }
+              }}
+            />
+          )}
         </>
       )}
+      <ConfirmDialog
+        open={pendingConfirm !== null}
+        title={pendingConfirm?.title || ''}
+        message={pendingConfirm?.message || ''}
+        onConfirm={() => pendingConfirm?.onConfirm()}
+        onCancel={() => setPendingConfirm(null)}
+      />
+      <AlertDialog
+        open={alertMsg !== null}
+        title={alertMsg?.title || ''}
+        message={alertMsg?.message || ''}
+        onClose={() => setAlertMsg(null)}
+      />
     </div>
   );
 }

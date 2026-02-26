@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
 import { Upload, Trash2, FileText, Building2, Briefcase, FolderOpen, Pencil, Check, X } from 'lucide-react';
+import ConfirmDialog from './ConfirmDialog';
+import AlertDialog from './AlertDialog';
 
 interface Document {
   id: number;
@@ -21,6 +23,8 @@ export default function Documents() {
   const [editingDocId, setEditingDocId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
   const [editType, setEditType] = useState('');
+  const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+  const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
 
   useEffect(() => {
     loadDocuments();
@@ -48,18 +52,24 @@ export default function Documents() {
       // Try to surface the server error message if available
       const anyErr = error as any;
       const serverMessage = anyErr?.response?.data?.error || anyErr?.message || 'Unknown error';
-      alert(`There was a problem uploading that file:\n\n${serverMessage}`);
+      setAlertMsg({ title: 'Upload error', message: `There was a problem uploading that file:\n\n${serverMessage}` });
     }
   }
 
-  async function handleDelete(docId: number) {
-    if (!confirm('Delete this document?')) return;
-    try {
-      await api.delete(`/documents/${docId}`);
-      loadDocuments();
-    } catch (error) {
-      console.error('Error deleting document:', error);
-    }
+  function handleDelete(docId: number) {
+    setPendingConfirm({
+      title: 'Delete document',
+      message: 'Are you sure you want to delete this document?',
+      onConfirm: async () => {
+        setPendingConfirm(null);
+        try {
+          await api.delete(`/documents/${docId}`);
+          loadDocuments();
+        } catch (error) {
+          console.error('Error deleting document:', error);
+        }
+      }
+    });
   }
 
   function startEditing(doc: Document) {
@@ -401,6 +411,19 @@ export default function Documents() {
           onUpload={handleUploadGeneral}
         />
       )}
+      <ConfirmDialog
+        open={pendingConfirm !== null}
+        title={pendingConfirm?.title || ''}
+        message={pendingConfirm?.message || ''}
+        onConfirm={() => pendingConfirm?.onConfirm()}
+        onCancel={() => setPendingConfirm(null)}
+      />
+      <AlertDialog
+        open={alertMsg !== null}
+        title={alertMsg?.title || ''}
+        message={alertMsg?.message || ''}
+        onClose={() => setAlertMsg(null)}
+      />
     </div>
   );
 }

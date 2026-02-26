@@ -253,6 +253,15 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
     }
   });
 
+  app.delete('/api/reminders/:id', async (req: Request, res: Response) => {
+    try {
+      await db.deleteReminder(parseInt(req.params.id));
+      res.status(204).send();
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Interactions
   app.get('/api/interactions', async (req: Request, res: Response) => {
     try {
@@ -447,6 +456,15 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
     try {
       const updated = await db.dismissNotification(parseInt(req.params.id));
       res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/notifications/dismiss-all', async (_req: Request, res: Response) => {
+    try {
+      await db.dismissAllNotifications();
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

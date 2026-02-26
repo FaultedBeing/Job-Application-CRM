@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
 import { Search, Bell } from 'lucide-react';
+import AlertDialog from './AlertDialog';
 
 interface Company {
   id: number;
@@ -23,6 +24,7 @@ export default function Companies() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [sortBy, setSortBy] = useState<'recent' | 'name' | 'jobs' | 'industry'>('recent');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
@@ -255,11 +257,17 @@ export default function Companies() {
               loadCompanies();
             } catch (error) {
               console.error('Error adding company:', error);
-              alert('Error adding company');
+              setAlertMsg({ title: 'Error', message: 'Error adding company' });
             }
           }}
         />
       )}
+      <AlertDialog
+        open={alertMsg !== null}
+        title={alertMsg?.title || ''}
+        message={alertMsg?.message || ''}
+        onClose={() => setAlertMsg(null)}
+      />
     </div>
   );
 }

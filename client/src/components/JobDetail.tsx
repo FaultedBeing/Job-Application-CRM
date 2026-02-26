@@ -3,6 +3,8 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api';
 import { ArrowLeft, Edit, Plus, Upload, Trash2, ExternalLink, Pencil, Check, X, Bell } from 'lucide-react';
 import USMap from './USMap';
+import ConfirmDialog from './ConfirmDialog';
+import AlertDialog from './AlertDialog';
 
 interface Job {
   id: number;
@@ -30,6 +32,7 @@ interface Contact {
   email: string;
   phone: string;
   linkedin_url?: string;
+  nearest_reminder?: string;
 }
 
 interface Interaction {
@@ -132,7 +135,7 @@ interface Reminder {
   created_at: string;
 }
 
-function ReminderCard({ reminder }: { reminder: Reminder }) {
+function ReminderCard({ reminder, onDelete }: { reminder: Reminder, onDelete: (id: number) => void }) {
   const [expanded, setExpanded] = useState(false);
   const isPast = !!reminder.sent_at;
 
@@ -156,8 +159,29 @@ function ReminderCard({ reminder }: { reminder: Reminder }) {
           <Bell size={14} />
           Past Reminder
         </div>
-        <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#fbbf24' }}>
-          Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#fbbf24' }}>
+            Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(reminder.id);
+            }}
+            title="Delete reminder"
+            style={{
+              padding: '0.25rem',
+              backgroundColor: 'transparent',
+              border: 'none',
+              color: '#4b5563',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <Trash2 size={14} />
+          </button>
         </div>
       </div>
     );
@@ -185,10 +209,31 @@ function ReminderCard({ reminder }: { reminder: Reminder }) {
             <Bell size={16} />
             {isPast ? 'Past Reminder' : 'Upcoming Reminder'}
           </div>
-          <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#9ca3af' }}>
-            <div style={{ color: isPast ? '#9ca3af' : '#fbbf24' }}>
-              Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#9ca3af' }}>
+              <div style={{ color: isPast ? '#9ca3af' : '#fbbf24' }}>
+                Due: {new Date(reminder.due_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+              </div>
             </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(reminder.id);
+              }}
+              title="Delete reminder"
+              style={{
+                padding: '0.25rem',
+                backgroundColor: 'transparent',
+                border: 'none',
+                color: '#4b5563',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <Trash2 size={16} />
+            </button>
           </div>
         </div>
         {reminder.contact_name && (
@@ -220,6 +265,8 @@ export default function JobDetail() {
   const [editDocName, setEditDocName] = useState('');
   const [editDocType, setEditDocType] = useState('');
   const [showJobMap, setShowJobMap] = useState(true);
+  const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+  const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -242,10 +289,10 @@ export default function JobDetail() {
       setContacts(contactsRes.data);
       // Get all interactions and filter for this job
       const allInteractions = await api.get('/interactions');
-      const filteredInteractions = allInteractions.data.filter((i: any) => i.job_id === parseInt(id!));
+      const filteredInteractions = Array.isArray(allInteractions.data) ? allInteractions.data.filter((i: any) => i.job_id === parseInt(id!)) : [];
       setInteractions(filteredInteractions);
-      setDocuments(documentsRes.data);
-      setReminders(remindersRes.data);
+      setDocuments(Array.isArray(documentsRes.data) ? documentsRes.data : []);
+      setReminders(Array.isArray(remindersRes.data) ? remindersRes.data : []);
     } catch (error) {
       console.error('Error loading job:', error);
     }
@@ -281,7 +328,7 @@ export default function JobDetail() {
       loadData();
     } catch (error) {
       console.error('Error saving job:', error);
-      alert('Error saving job');
+      setAlertMsg({ title: 'Error', message: 'Error saving job' });
     }
   }
 
@@ -312,8 +359,25 @@ export default function JobDetail() {
       loadData();
     } catch (error) {
       console.error('Error adding reminder:', error);
-      alert('Error adding reminder: ' + (error as any).message);
+      setAlertMsg({ title: 'Error', message: 'Error adding reminder: ' + (error as any).message });
     }
+  }
+
+  function handleDeleteReminder(reminderId: number) {
+    setPendingConfirm({
+      title: 'Delete reminder',
+      message: 'Are you sure you want to delete this reminder?',
+      onConfirm: async () => {
+        setPendingConfirm(null);
+        try {
+          await api.delete(`/reminders/${reminderId}`);
+          loadData();
+        } catch (error) {
+          console.error('Error deleting reminder:', error);
+          setAlertMsg({ title: 'Error', message: 'Error deleting reminder' });
+        }
+      }
+    });
   }
 
   const [confirmInteractionId, setConfirmInteractionId] = useState<number | null>(null);
@@ -326,7 +390,7 @@ export default function JobDetail() {
       loadData();
     } catch (error) {
       console.error('Error deleting interaction:', error);
-      alert('Error deleting interaction');
+      setAlertMsg({ title: 'Error', message: 'Error deleting interaction' });
     }
   }
 
@@ -341,18 +405,24 @@ export default function JobDetail() {
       console.error('Error uploading document:', error);
       const anyErr = error as any;
       const serverMessage = anyErr?.response?.data?.error || anyErr?.message || 'Unknown error';
-      alert(`There was a problem uploading that file:\n\n${serverMessage}`);
+      setAlertMsg({ title: 'Upload error', message: `There was a problem uploading that file:\n\n${serverMessage}` });
     }
   }
 
-  async function handleDeleteDocument(docId: number) {
-    if (!confirm('Delete this document?')) return;
-    try {
-      await api.delete(`/documents/${docId}`);
-      loadData();
-    } catch (error) {
-      console.error('Error deleting document:', error);
-    }
+  function handleDeleteDocument(docId: number) {
+    setPendingConfirm({
+      title: 'Delete document',
+      message: 'Are you sure you want to delete this document?',
+      onConfirm: async () => {
+        setPendingConfirm(null);
+        try {
+          await api.delete(`/documents/${docId}`);
+          loadData();
+        } catch (error) {
+          console.error('Error deleting document:', error);
+        }
+      }
+    });
   }
 
   function startEditingDoc(doc: Document) {
@@ -391,33 +461,44 @@ export default function JobDetail() {
       setJobNotes(res.data.notes || '');
     } catch (error) {
       console.error('Error saving notes:', error);
-      alert('Error saving notes');
+      setAlertMsg({ title: 'Error', message: 'Error saving notes' });
       setJobNotes(job.notes || '');
     }
   }
 
-  async function handleDeleteJob() {
+  function handleDeleteJob() {
     if (!job) return;
-    if (!confirm('Delete this job?')) return;
-
-    try {
-      await api.delete(`/jobs/${job.id}`);
-      navigate('/applications');
-    } catch (error) {
-      console.error('Error deleting job:', error);
-      alert('Error deleting job');
-    }
+    setPendingConfirm({
+      title: 'Delete job',
+      message: 'Are you sure you want to delete this job?',
+      onConfirm: async () => {
+        setPendingConfirm(null);
+        try {
+          await api.delete(`/jobs/${job.id}`);
+          navigate('/applications');
+        } catch (error) {
+          console.error('Error deleting job:', error);
+          setAlertMsg({ title: 'Error', message: 'Error deleting job' });
+        }
+      }
+    });
   }
 
-  async function handleDeleteContact(contactId: number) {
-    if (!confirm('Delete this contact?')) return;
-    try {
-      await api.delete(`/contacts/${contactId}`);
-      loadData();
-    } catch (error) {
-      console.error('Error deleting contact:', error);
-      alert('Error deleting contact');
-    }
+  function handleDeleteContact(contactId: number) {
+    setPendingConfirm({
+      title: 'Delete contact',
+      message: 'Are you sure you want to delete this contact?',
+      onConfirm: async () => {
+        setPendingConfirm(null);
+        try {
+          await api.delete(`/contacts/${contactId}`);
+          loadData();
+        } catch (error) {
+          console.error('Error deleting contact:', error);
+          setAlertMsg({ title: 'Error', message: 'Error deleting contact' });
+        }
+      }
+    });
   }
 
   if (!job) return <div>Loading...</div>;
@@ -672,7 +753,7 @@ export default function JobDetail() {
                 {reminders.length > 0 && (
                   <div style={{ marginBottom: '1rem' }}>
                     {reminders.map((reminder) => (
-                      <ReminderCard key={reminder.id} reminder={reminder} />
+                      <ReminderCard key={reminder.id} reminder={reminder} onDelete={handleDeleteReminder} />
                     ))}
                   </div>
                 )}
@@ -785,10 +866,16 @@ export default function JobDetail() {
                           <p style={{ fontWeight: 'bold' }}>
                             <Link
                               to={`/contacts/${contact.id}`}
-                              style={{ color: '#e5e7eb', textDecoration: 'none' }}
+                              style={{ color: '#e5e7eb', textDecoration: 'none', fontWeight: 'bold' }}
                             >
                               {contact.name}
                             </Link>
+                            {contact.nearest_reminder && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', fontSize: '0.7rem', marginTop: '0.2rem' }}>
+                                <Bell size={10} />
+                                {new Date(contact.nearest_reminder).toLocaleDateString()}
+                              </div>
+                            )}
                           </p>
                           {contact.role && <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{contact.role}</p>}
                           {contact.email && (
@@ -948,73 +1035,26 @@ export default function JobDetail() {
           onSave={handleAddReminder}
         />
       )}
-      {/* Delete activity confirmation */}
-      {confirmInteractionId !== null && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.6)',
-            zIndex: 2000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-          onClick={() => setConfirmInteractionId(null)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              backgroundColor: '#1a1d24',
-              borderRadius: '12px',
-              padding: '1.5rem',
-              width: '90%',
-              maxWidth: '420px',
-              border: '1px solid #2d3139',
-              boxShadow: '0 20px 45px rgba(0,0,0,0.6)'
-            }}
-          >
-            <h2 style={{ fontSize: '1.1rem', color: '#fbbf24', marginBottom: '0.75rem' }}>Delete activity</h2>
-            <p style={{ color: '#e5e7eb', fontSize: '0.95rem', marginBottom: '1.25rem' }}>
-              This will remove this activity entry from the log. This will not delete any related job, company, or
-              contact.
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-              <button
-                type="button"
-                onClick={() => setConfirmInteractionId(null)}
-                style={{
-                  padding: '0.5rem 1rem',
-                  backgroundColor: 'transparent',
-                  border: '1px solid #2d3139',
-                  borderRadius: '6px',
-                  color: '#e5e7eb',
-                  cursor: 'pointer',
-                  fontSize: '0.9rem'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteInteractionConfirmed}
-                style={{
-                  padding: '0.5rem 1rem',
-                  backgroundColor: '#ef4444',
-                  border: 'none',
-                  borderRadius: '6px',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  fontWeight: 600
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={confirmInteractionId !== null}
+        title="Delete activity"
+        message="This will remove this activity entry from the log. This will not delete any related job, company, or contact."
+        onConfirm={handleDeleteInteractionConfirmed}
+        onCancel={() => setConfirmInteractionId(null)}
+      />
+      <ConfirmDialog
+        open={pendingConfirm !== null}
+        title={pendingConfirm?.title || ''}
+        message={pendingConfirm?.message || ''}
+        onConfirm={() => pendingConfirm?.onConfirm()}
+        onCancel={() => setPendingConfirm(null)}
+      />
+      <AlertDialog
+        open={alertMsg !== null}
+        title={alertMsg?.title || ''}
+        message={alertMsg?.message || ''}
+        onClose={() => setAlertMsg(null)}
+      />
     </div>
   );
 }

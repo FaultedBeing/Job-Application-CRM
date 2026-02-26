@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
 import { Plus, Search, Bell } from 'lucide-react';
+import AlertDialog from './AlertDialog';
 
 interface Job {
   id: number;
@@ -23,6 +24,7 @@ export default function JobBoard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'date' | 'excitement' | 'fit'>('date');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
 
   useEffect(() => {
     loadJobs();
@@ -73,7 +75,7 @@ export default function JobBoard() {
       loadJobs();
     } catch (error) {
       console.error('Error adding job:', error);
-      alert('Error adding job');
+      setAlertMsg({ title: 'Error', message: 'Error adding job' });
     }
   }
 
@@ -246,6 +248,12 @@ export default function JobBoard() {
           onSave={handleAddJob}
         />
       )}
+      <AlertDialog
+        open={alertMsg !== null}
+        title={alertMsg?.title || ''}
+        message={alertMsg?.message || ''}
+        onClose={() => setAlertMsg(null)}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import api from '../api';
 import { Download, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import ConfirmDialog from './ConfirmDialog';
 
 export default function Settings() {
   const [username, setUsername] = useState('');
@@ -10,12 +11,23 @@ export default function Settings() {
   const [industries, setIndustries] = useState<string[]>([]);
   const [newIndustry, setNewIndustry] = useState('');
   const [allowPrerelease, setAllowPrerelease] = useState(false);
-   const [showJobMap, setShowJobMap] = useState(true);
+  const [showJobMap, setShowJobMap] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [initialLoaded, setInitialLoaded] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; confirmLabel?: string; confirmColor?: string; onConfirm: () => void } | null>(null);
 
   useEffect(() => {
-    loadSettings();
+    loadSettings().then(() => setInitialLoaded(true));
   }, []);
+
+  // Auto-save logic
+  useEffect(() => {
+    if (!initialLoaded) return;
+    const timer = setTimeout(() => {
+      saveSettings();
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [username, statuses, allowPrerelease, showJobMap, initialLoaded]);
 
   function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
     setToast({ message, type });
@@ -34,7 +46,7 @@ export default function Settings() {
       const statusStr = res.data.statuses || 'Wishlist,Applied,Interviewing,Offer,Rejected';
       setStatuses(statusStr.split(','));
       const rawIndustryStr: string | null | undefined = res.data.industries;
-      
+
       // Always reset industries to fix any broken comma-separated entries
       // This ensures proper pipe-delimited format
       const defaultIndustries = [
@@ -54,7 +66,7 @@ export default function Settings() {
         'Space Software & Mission Operations',
         'Other Space-Related'
       ];
-      
+
       // Seed defaults if settings are missing (first run / older DB)
       if (rawIndustryStr === undefined || rawIndustryStr === null) {
         setIndustries(defaultIndustries);
@@ -82,7 +94,7 @@ export default function Settings() {
           setIndustries(industryList);
         }
       }
-      
+
       // Load allow_prerelease setting
       const allowPrereleaseStr = res.data.allow_prerelease || 'false';
       setAllowPrerelease(allowPrereleaseStr === 'true');
@@ -124,13 +136,13 @@ export default function Settings() {
 
   function addStatus() {
     if (newStatus.trim() && !statuses.includes(newStatus.trim())) {
-      setStatuses([...statuses, newStatus.trim()]);
+      setStatuses(prev => [...prev, newStatus.trim()]);
       setNewStatus('');
     }
   }
 
   function removeStatus(status: string) {
-    setStatuses(statuses.filter(s => s !== status));
+    setStatuses(prev => prev.filter(s => s !== status));
   }
 
   async function addIndustry() {
@@ -169,21 +181,32 @@ export default function Settings() {
     }
   }
 
-  async function resetDatabase() {
-    if (!confirm('Are you sure you want to reset the database? This will delete ALL data and cannot be undone!')) {
-      return;
-    }
-    if (!confirm('This is your last chance. Are you absolutely sure?')) {
-      return;
-    }
-    try {
-      await api.post('/reset-database');
-      showToast('Database reset. Reloading…', 'success');
-      window.setTimeout(() => window.location.reload(), 800);
-    } catch (error) {
-      console.error('Error resetting database:', error);
-      showToast('Error resetting database', 'error');
-    }
+  function resetDatabase() {
+    setPendingConfirm({
+      title: 'Reset database',
+      message: 'Are you sure you want to reset the database? This will delete ALL data and cannot be undone!',
+      confirmLabel: 'Continue',
+      confirmColor: '#ef4444',
+      onConfirm: () => {
+        setPendingConfirm({
+          title: 'Final warning',
+          message: 'This is your last chance. Are you absolutely sure?',
+          confirmLabel: 'Reset Everything',
+          confirmColor: '#ef4444',
+          onConfirm: async () => {
+            setPendingConfirm(null);
+            try {
+              await api.post('/reset-database');
+              showToast('Database reset. Reloading\u2026', 'success');
+              window.setTimeout(() => window.location.reload(), 800);
+            } catch (error) {
+              console.error('Error resetting database:', error);
+              showToast('Error resetting database', 'error');
+            }
+          }
+        });
+      }
+    });
   }
 
   function handleCheckForUpdates() {
@@ -351,12 +374,19 @@ export default function Settings() {
           </button>
           {industries.length > 0 && (
             <button
-              onClick={async () => {
-                if (confirm('Are you sure you want to clear all industry categories?')) {
-                  const next: string[] = [];
-                  setIndustries(next);
-                  await saveIndustries(next);
-                }
+              onClick={() => {
+                setPendingConfirm({
+                  title: 'Clear industries',
+                  message: 'Are you sure you want to clear all industry categories?',
+                  confirmLabel: 'Clear All',
+                  confirmColor: '#ef4444',
+                  onConfirm: async () => {
+                    setPendingConfirm(null);
+                    const next: string[] = [];
+                    setIndustries(next);
+                    await saveIndustries(next);
+                  }
+                });
               }}
               style={{
                 padding: '0.75rem 1.5rem',
@@ -476,8 +506,8 @@ export default function Settings() {
         </div>
       </section>
 
-      {/* Actions */}
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
+      {/* Actions (Manual trigger if needed) */}
+      <div style={{ display: 'none', gap: '1rem', marginBottom: '2rem' }}>
         <button
           onClick={saveSettings}
           style={{
@@ -588,6 +618,15 @@ export default function Settings() {
           </button>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingConfirm !== null}
+        title={pendingConfirm?.title || ''}
+        message={pendingConfirm?.message || ''}
+        confirmLabel={pendingConfirm?.confirmLabel}
+        confirmColor={pendingConfirm?.confirmColor}
+        onConfirm={() => pendingConfirm?.onConfirm()}
+        onCancel={() => setPendingConfirm(null)}
+      />
 
     </div>
   );
