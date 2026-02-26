@@ -2,6 +2,8 @@
 
 A standalone desktop application for managing job applications, companies, contacts, and interactions throughout your job search process.
 
+In
+
 ## Quick Start (For End Users)
 
 ### Download and Install
@@ -37,6 +39,7 @@ You can also manually check for updates by right-clicking the system tray icon â
 
 - **Job Applications Management**: Track all your job applications with status, scores, and details
 - **Company Management**: Automatically creates companies when adding jobs, with logo fetching
+- **Email Reminders**: When the application is running, set up email reminders to follow up on contacts and receive reminders in your mailbox
 - **Contact Management**: Track contacts associated with companies and jobs
 - **Interaction Logging**: Log emails, calls, interviews, and notes for each contact
 - **Document Management**: Upload and manage resumes, cover letters, and other documents
