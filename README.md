@@ -2,8 +2,6 @@
 
 A standalone desktop application for managing job applications, companies, contacts, and interactions throughout your job search process.
 
-In
-
 ## Quick Start (For End Users)
 
 ### Download and Install
