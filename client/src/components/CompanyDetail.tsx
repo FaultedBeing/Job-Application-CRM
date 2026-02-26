@@ -117,6 +117,12 @@ export default function CompanyDetail() {
   const [notesDraft, setNotesDraft] = useState('');
   const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
   const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
+  const [isNotesCollapsed, setIsNotesCollapsed] = useState(() => {
+    if (!id) return true;
+    const saved = localStorage.getItem(`notes_collapsed_${id}`);
+    return saved === null ? true : saved === 'true';
+  });
+  const [isNotesEditing, setIsNotesEditing] = useState(false);
 
   function formatWebsiteDisplay(url?: string | null) {
     if (!url) return '';
@@ -161,6 +167,7 @@ export default function CompanyDetail() {
 
   async function handleSaveNotes() {
     if (!company) return;
+    setIsNotesEditing(false);
     if (notesDraft === (company.notes || '')) return;
 
     try {
@@ -176,6 +183,12 @@ export default function CompanyDetail() {
       setNotesDraft(company.notes || '');
     }
   }
+
+  const toggleNotesCollapse = () => {
+    const next = !isNotesCollapsed;
+    setIsNotesCollapsed(next);
+    localStorage.setItem(`notes_collapsed_${id}`, String(next));
+  };
 
   function handleDeleteCompany() {
     if (!company) return;
@@ -342,25 +355,108 @@ export default function CompanyDetail() {
             )}
           </div>
 
-          <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
-            <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>Notes</h2>
-            <textarea
-              value={notesDraft}
-              onChange={(e) => setNotesDraft(e.target.value)}
-              onBlur={handleSaveNotes}
-              placeholder="Click here to add notes about this company..."
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                backgroundColor: '#0f1115',
-                border: '1px solid #2d3139',
-                borderRadius: '6px',
-                color: '#e5e7eb',
-                minHeight: '100px',
-                resize: 'vertical'
-              }}
-            />
-            <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.5rem' }}>Notes save automatically when you click away.</p>
+          <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem', border: '1px solid #2d3139' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.25rem', margin: 0, color: '#e5e7eb' }}>Notes</h2>
+              {!isNotesEditing && (
+                <button
+                  onClick={() => setIsNotesEditing(true)}
+                  style={{
+                    fontSize: '0.8rem',
+                    color: '#fbbf24',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.25rem'
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+
+            {isNotesEditing ? (
+              <>
+                <textarea
+                  value={notesDraft}
+                  autoFocus
+                  onChange={(e) => setNotesDraft(e.target.value)}
+                  onBlur={handleSaveNotes}
+                  placeholder="Click here to add notes about this company..."
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    backgroundColor: '#0f1115',
+                    border: '1px solid #fbbf24',
+                    borderRadius: '6px',
+                    color: '#e5e7eb',
+                    minHeight: '150px',
+                    resize: 'vertical',
+                    fontFamily: 'inherit',
+                    fontSize: '0.95rem',
+                    lineHeight: '1.5'
+                  }}
+                />
+                <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.5rem' }}>Notes save automatically when you click away.</p>
+              </>
+            ) : (
+              <div style={{ position: 'relative' }}>
+                <div
+                  onClick={() => setIsNotesEditing(true)}
+                  style={{
+                    backgroundColor: '#242832',
+                    padding: '1rem',
+                    borderRadius: '6px',
+                    color: '#D1D5DB',
+                    whiteSpace: 'pre-wrap',
+                    fontSize: '0.95rem',
+                    lineHeight: '1.6',
+                    cursor: 'text',
+                    minHeight: '60px',
+                    maxHeight: isNotesCollapsed ? '200px' : 'none',
+                    overflow: 'hidden',
+                    position: 'relative',
+                    transition: 'max-height 0.3s ease-out'
+                  }}
+                >
+                  {company?.notes || <span style={{ color: '#6b7280' }}>Click here to add notes...</span>}
+
+                  {isNotesCollapsed && (company?.notes?.length || 0) > 400 && (
+                    <div style={{
+                      position: 'absolute',
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      height: '60px',
+                      background: 'linear-gradient(transparent, #242832)',
+                      pointerEvents: 'none'
+                    }} />
+                  )}
+                </div>
+
+                {(company?.notes?.length || 0) > 400 && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleNotesCollapse(); }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#9ca3af',
+                      fontSize: '0.8rem',
+                      cursor: 'pointer',
+                      marginTop: '0.5rem',
+                      padding: '0.25rem 0.5rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.25rem'
+                    }}
+                  >
+                    {isNotesCollapsed ? 'Show More ↓' : 'Show Less ↑'}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>

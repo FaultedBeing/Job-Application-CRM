@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
-import { Search, Bell } from 'lucide-react';
+import { Search, Bell, Upload } from 'lucide-react';
 import AlertDialog from './AlertDialog';
 
 interface Company {
@@ -26,6 +26,8 @@ export default function Companies() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadCompanies();
@@ -53,6 +55,27 @@ export default function Companies() {
     const trimmed = url.trim();
     if (/^https?:\/\//i.test(trimmed)) return trimmed;
     return `https://${trimmed}`;
+  }
+
+  async function handleImportFile(file: File) {
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/import/companies', formData);
+      const { imported, skipped, newIndustries } = res.data;
+      let msg = `Imported ${imported} compan${imported === 1 ? 'y' : 'ies'}.`;
+      if (skipped > 0) msg += `\n${skipped} skipped (duplicates or empty).`;
+      if (newIndustries?.length > 0) msg += `\n${newIndustries.length} new industr${newIndustries.length === 1 ? 'y' : 'ies'} added.`;
+      setAlertMsg({ title: 'Import complete', message: msg });
+      loadCompanies();
+    } catch (error: any) {
+      const serverMsg = error?.response?.data?.error || error?.message || 'Unknown error';
+      setAlertMsg({ title: 'Import failed', message: serverMsg });
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   }
 
   const sortedCompanies = useMemo(() => {
@@ -88,20 +111,52 @@ export default function Companies() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <h1 style={{ fontSize: '2rem', color: '#fbbf24' }}>Companies</h1>
-        <button
-          onClick={() => setShowAddModal(true)}
-          style={{
-            padding: '0.75rem 1.5rem',
-            backgroundColor: '#fbbf24',
-            color: '#0f1115',
-            border: 'none',
-            borderRadius: '6px',
-            fontWeight: 'bold',
-            cursor: 'pointer'
-          }}
-        >
-          Add Company
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleImportFile(file);
+            }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem 1.5rem',
+              backgroundColor: 'transparent',
+              color: '#fbbf24',
+              border: '1px solid #fbbf24',
+              borderRadius: '6px',
+              fontWeight: 'bold',
+              cursor: importing ? 'not-allowed' : 'pointer',
+              opacity: importing ? 0.6 : 1
+            }}
+          >
+            <Upload size={16} />
+            {importing ? 'Importing…' : 'Import'}
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            style={{
+              padding: '0.75rem 1.5rem',
+              backgroundColor: '#fbbf24',
+              color: '#0f1115',
+              border: 'none',
+              borderRadius: '6px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            Add Company
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -169,7 +224,7 @@ export default function Companies() {
               e.currentTarget.style.borderColor = '#2d3139';
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', marginBottom: '0.5rem' }}>
               {company.logo_url && (
                 <div
                   style={{

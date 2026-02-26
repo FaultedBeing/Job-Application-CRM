@@ -27,7 +27,10 @@ export class Database {
 
     // Use machine-specific info to derive a key (hostname, user, platform)
     const machineInfo = `${os.hostname()}-${os.userInfo().username}-${os.platform()}`;
-    const salt = 'job-tracker-v2.0.0-salt'; // Version-specific salt
+    // ⚠️  DO NOT CHANGE THIS SALT VALUE! It is used to derive the encryption key
+    // for all data stored in the database. Changing it (e.g. during a version bump)
+    // will make ALL existing encrypted data permanently unreadable.
+    const salt = 'job-tracker-v2.0.0-salt';
     this.encryptionKey = crypto.pbkdf2Sync(machineInfo, salt, 100000, 32, 'sha256');
     return this.encryptionKey;
   }

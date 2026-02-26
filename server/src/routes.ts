@@ -4,6 +4,7 @@ import { Database } from './database';
 import fs from 'fs-extra';
 import { fetchCompanyLogo, fetchCompanyInfo } from './companyEnrichment';
 import nodemailer from 'nodemailer';
+import * as XLSX from 'xlsx';
 
 export function setupRoutes(app: Express, db: Database, upload: Multer) {
   // Companies
@@ -673,6 +674,173 @@ export function setupRoutes(app: Express, db: Database, upload: Multer) {
     } catch (error: any) {
       console.error('SMTP send error:', error);
       res.status(500).json({ error: error.message || 'SMTP send failed' });
+    }
+  });
+
+  // Extract just city + state from LinkedIn-style addresses
+  // e.g. "90026, California, Los Angeles, United States" → "Los Angeles, California"
+  //      "Charleroi [BELGIUM], Belgium" → "Charleroi"
+  function parseCityState(address: string): string | null {
+    if (!address) return null;
+
+    // Remove bracketed tags like [BELGIUM]
+    let cleaned = address.replace(/\[.*?\]/g, '').trim();
+
+    // Split by comma
+    const parts = cleaned.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length === 0) return null;
+
+    // Remove country names (last part is typically the country)
+    const countries = ['united states', 'united kingdom', 'canada', 'australia', 'germany', 'france',
+      'netherlands', 'belgium', 'india', 'japan', 'china', 'brazil', 'spain', 'italy', 'sweden',
+      'switzerland', 'ireland', 'israel', 'singapore', 'south korea', 'denmark', 'norway', 'finland',
+      'austria', 'poland', 'portugal', 'mexico', 'new zealand', 'czech republic', 'romania',
+      'hungary', 'greece', 'turkey', 'argentina', 'colombia', 'chile', 'ukraine', 'thailand',
+      'philippines', 'indonesia', 'malaysia', 'vietnam', 'pakistan', 'bangladesh', 'egypt',
+      'south africa', 'nigeria', 'kenya', 'uae', 'saudi arabia', 'qatar', 'luxembourg', 'estonia',
+      'latvia', 'lithuania', 'croatia', 'serbia', 'bulgaria', 'slovakia', 'slovenia', 'iceland',
+      'malta', 'cyprus', 'taiwan', 'hong kong'];
+    while (parts.length > 1 && countries.includes(parts[parts.length - 1].toLowerCase())) {
+      parts.pop();
+    }
+
+    // Remove leading zip codes (digits-only parts at the start)
+    while (parts.length > 1 && /^\d+$/.test(parts[0])) {
+      parts.shift();
+    }
+
+    if (parts.length === 0) return null;
+
+    // For US-style "State, City" remaining → return "City, State"
+    if (parts.length >= 2) {
+      const city = parts[parts.length - 1];
+      const state = parts[parts.length - 2];
+      return `${city}, ${state}`;
+    }
+
+    return parts[0] || null;
+  }
+
+  // Import companies from Excel
+  app.post('/api/import/companies', upload.single('file'), async (req: Request, res: Response) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: 'No file uploaded' });
+        return;
+      }
+
+      const workbook = XLSX.readFile(req.file.path);
+
+      // Try "Companies" sheet first, then fall back to the first sheet
+      const sheetName = workbook.SheetNames.includes('Companies')
+        ? 'Companies'
+        : workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet);
+
+      // Get existing company names for duplicate detection
+      const existingCompanies = await db.getCompanies();
+      const existingNames = new Set(existingCompanies.map((c: any) => c.name?.toLowerCase().trim()));
+
+      // Get existing industries from settings
+      const settings = await db.getSettings();
+      const existingIndustries: string[] = settings.industries
+        ? settings.industries.split('|').map((s: string) => s.trim()).filter(Boolean)
+        : [];
+      const industrySet = new Set(existingIndustries.map(i => i.toLowerCase()));
+      const newIndustries: string[] = [];
+
+      let imported = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+      const importedCompanies: { id: number; website: string }[] = [];
+
+      for (const row of rows) {
+        const name = (row['Name'] || '').toString().trim();
+        if (!name) {
+          skipped++;
+          continue;
+        }
+
+        // Skip duplicates
+        if (existingNames.has(name.toLowerCase())) {
+          skipped++;
+          continue;
+        }
+
+        // Build notes from Description, Tagline, Specialities, LinkedIn URL
+        const noteParts: string[] = [];
+        if (row['Tagline']) noteParts.push(row['Tagline'].toString().trim());
+        if (row['Description']) noteParts.push(row['Description'].toString().trim());
+        if (row['Specialities']) noteParts.push(`Specialities: ${row['Specialities'].toString().trim()}`);
+        if (row['LinkedIn URL']) noteParts.push(`LinkedIn: ${row['LinkedIn URL'].toString().trim()}`);
+
+        const industry = (row['Industry'] || '').toString().trim();
+
+        // Auto-add new industry labels
+        if (industry && !industrySet.has(industry.toLowerCase())) {
+          industrySet.add(industry.toLowerCase());
+          newIndustries.push(industry);
+        }
+
+        try {
+          const created = await db.createCompany({
+            name,
+            website: (row['Website'] || '').toString().trim() || null,
+            industry: industry || null,
+            notes: noteParts.length > 0 ? noteParts.join('\n\n') : null,
+            location: parseCityState((row['Address'] || '').toString().trim()),
+            employee_count: null,
+            company_size: (row['Employee Range'] || '').toString().trim() || null,
+            logo_url: null,
+            dark_logo_bg: false
+          });
+          existingNames.add(name.toLowerCase());
+          imported++;
+
+          // Track for background logo fetch
+          const website = (row['Website'] || '').toString().trim();
+          if (created && website) {
+            importedCompanies.push({ id: created.id, website });
+          }
+        } catch (err: any) {
+          errors.push(`${name}: ${err.message}`);
+        }
+      }
+
+      // Persist new industry labels to settings
+      if (newIndustries.length > 0) {
+        const allIndustries = [...existingIndustries, ...newIndustries];
+        await db.updateSetting('industries', allIndustries.join('|'));
+      }
+
+      // Clean up uploaded file
+      await fs.remove(req.file.path);
+
+      res.json({ imported, skipped, errors, newIndustries });
+
+      // Background: fetch logos for imported companies with websites
+      if (importedCompanies.length > 0) {
+        (async () => {
+          for (const { id, website } of importedCompanies) {
+            try {
+              const logoUrl = await fetchCompanyLogo(website);
+              if (logoUrl) {
+                const company = await db.getCompany(id);
+                if (company) {
+                  await db.updateCompany(id, { ...company, logo_url: logoUrl });
+                }
+              }
+            } catch (err) {
+              console.error(`Logo fetch failed for company ${id}:`, err);
+            }
+          }
+          console.log(`Logo fetch complete for ${importedCompanies.length} companies`);
+        })();
+      }
+    } catch (error: any) {
+      console.error('Import error:', error);
+      res.status(500).json({ error: error.message });
     }
   });
 }

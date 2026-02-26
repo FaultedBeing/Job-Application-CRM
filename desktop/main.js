@@ -1283,6 +1283,14 @@ function createWindow() {
     }
   });
 
+  // Open external links (target="_blank") in the user's default browser
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
   setupSpellcheckAndContextMenu(mainWindow);
 
   // Show a lightweight splash immediately
