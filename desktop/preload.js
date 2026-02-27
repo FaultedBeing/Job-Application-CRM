@@ -2,6 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // Expose a limited, safe API to the renderer
 contextBridge.exposeInMainWorld('electronAPI', {
+  getAppVersion: () => {
+    return ipcRenderer.invoke('get-app-version');
+  },
   checkForUpdates: () => {
     return ipcRenderer.invoke('check-for-updates');
   },

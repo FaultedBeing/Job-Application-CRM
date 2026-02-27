@@ -1,6 +1,6 @@
 {
   "name": "job-tracker-desktop",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "description": "Desktop wrapper for Job Application Tracker",
   "main": "main.js",
   "scripts": {

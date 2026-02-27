@@ -314,6 +314,45 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
     }
   });
 
+  // Email Drafts
+  app.get('/api/contacts/:id/email-drafts', async (req: Request, res: Response) => {
+    try {
+      const drafts = await db.getContactEmailDrafts(parseInt(req.params.id));
+      res.json(drafts);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/contacts/:id/email-drafts', async (req: Request, res: Response) => {
+    try {
+      const { content } = req.body;
+      const draft = await db.createEmailDraft(parseInt(req.params.id), content);
+      res.status(201).json(draft);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put('/api/email-drafts/:id', async (req: Request, res: Response) => {
+    try {
+      const { content } = req.body;
+      await db.updateEmailDraft(parseInt(req.params.id), content);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete('/api/email-drafts/:id', async (req: Request, res: Response) => {
+    try {
+      await db.deleteEmailDraft(parseInt(req.params.id));
+      res.status(204).send();
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Interactions
   app.get('/api/interactions', async (req: Request, res: Response) => {
     try {

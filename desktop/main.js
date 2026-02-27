@@ -1609,26 +1609,35 @@ function checkForUpdates(manual = false) {
   const latestYaml = localPath ? path.join(localPath, 'latest.yml') : null;
 
   if (enableLocalUpdates && latestYaml && fs.existsSync(latestYaml)) {
-    console.log('[Auto-updater] Local latest.yml found, prioritizing local feed at:', localPath);
+    console.log('[Auto-updater] Local latest.yml found, checking local version at:', localPath);
     try {
-      autoUpdater.setFeedURL({
-        provider: 'generic',
-        url: `file://${localPath}`
-      });
+      const yamlContent = fs.readFileSync(latestYaml, 'utf-8');
+      const versionMatch = yamlContent.match(/version:\s*(.+)/);
+      if (versionMatch && versionMatch[1]) {
+        const localVersion = versionMatch[1].trim();
+        console.log(`[Auto-updater] Local update version found: ${localVersion}`);
+        // Simulate an update available event since we found a local build package
+        if (mainWindow) {
+          mainWindow.webContents.send('update-available', { version: localVersion, isLocal: true });
+        }
+      } else {
+        throw new Error('Could not parse version from local latest.yml');
+      }
     } catch (err) {
-      console.error('[Auto-updater] Error setting local feed:', err);
+      console.error('[Auto-updater] Error checking local feed:', err);
+      if (mainWindow) mainWindow.webContents.send('update-error', 'Local update check failed: ' + err.message);
     }
-  } else {
-    // Standard GitHub feed fallback
-    try {
-      autoUpdater.setFeedURL({
-        provider: 'github',
-        owner: 'FaultedBeing',
-        repo: 'Job-Application-CRM'
-      });
-    } catch (err) {
-      console.error('[Auto-updater] Error setting GitHub feed:', err);
-    }
+    // We stop here to prevent it from going to GitHub when local overrides are enabled
+    return;
+  }
+  try {
+    autoUpdater.setFeedURL({
+      provider: 'github',
+      owner: 'FaultedBeing',
+      repo: 'Job-Application-CRM'
+    });
+  } catch (err) {
+    console.error('[Auto-updater] Error setting GitHub feed:', err);
   }
 
   // Final check
@@ -1692,6 +1701,10 @@ ipcMain.handle('gmail-send-test', async (_event, payload) => {
 });
 
 // IPC handler so renderer (Settings page) can trigger update checks
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
+});
+
 ipcMain.handle('check-for-updates', async () => {
   // Reload prerelease setting in case user just toggled it
   try {

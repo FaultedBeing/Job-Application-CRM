@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 import { geoMercator, geoPath } from 'd3-geo';
 import { feature } from 'topojson-client';
-// @ts-ignore – JSON import from node_modules
 import worldTopology from 'world-atlas/countries-50m.json';
 
 /* ─── types ───────────────────────────────────────────────────────── */
@@ -70,6 +69,8 @@ function matchInList(list: CityEntry[], raw: string): CityEntry[] {
 /* ─── component ───────────────────────────────────────────────────── */
 
 export default function RegionMap({ location, height = 200, cities, center, scale }: Omit<RegionMapProps, 'countryCode'>) {
+
+
     const { best } = useMemo(() => {
         if (!location) return { best: null };
         const matches = matchInList(cities, location);
@@ -85,12 +86,11 @@ export default function RegionMap({ location, height = 200, cities, center, scal
     const pathGenerator = useMemo(() => geoPath(projection), [projection]);
 
     const countriesGeo = useMemo(() => {
-        const topo: any = worldTopology;
-        return feature(topo, topo.objects.countries) as any;
+        return feature(worldTopology as any, (worldTopology as any).objects.countries) as any;
     }, []);
 
     // Filter or highlight the specific country if needed, for now we show all but centered on region
-    const features = useMemo(() => countriesGeo.features as any[], [countriesGeo]);
+    const features = useMemo(() => countriesGeo ? (countriesGeo.features as any[]) : [], [countriesGeo]);
 
     const targetXY = useMemo(() => {
         if (!active) return null;
@@ -140,10 +140,14 @@ export default function RegionMap({ location, height = 200, cities, center, scal
 
         const cx = (minX + maxX) / 2;
         const cy = (minY + maxY) / 2;
-        return `${cx - w / 2} ${cy - h / 2} ${w} ${h}`;
+        return `${cx} ${cy} ${w} ${h}`;
     }, [targetXY, refXYs]);
 
-    const vbWidth = useMemo(() => parseFloat(viewBox.split(' ')[2]) || 960, [viewBox]);
+    const vbWidth = useMemo(() => {
+        const parts = viewBox.split(' ');
+        return parseFloat(parts[2]) || 960;
+    }, [viewBox]);
+
     const pinR = Math.max(3, vbWidth * 0.009);
     const glowR = pinR * 2;
     const labelSize = Math.max(8, vbWidth * 0.018);
@@ -193,9 +197,16 @@ export default function RegionMap({ location, height = 200, cities, center, scal
 
     if (!location || !active) return null;
 
+    const viewBoxParts = viewBox.split(' ');
+    const cx = parseFloat(viewBoxParts[0]);
+    const cy = parseFloat(viewBoxParts[1]);
+    const w = parseFloat(viewBoxParts[2]);
+    const h = parseFloat(viewBoxParts[3]);
+    const vbString = `${cx - w / 2} ${cy - h / 2} ${w} ${h}`;
+
     return (
         <div style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid #2d3139', backgroundColor: '#080a0e', marginTop: '0.75rem' }}>
-            <svg viewBox={viewBox} width="100%" style={{ display: 'block', maxHeight: `${height}px` }} preserveAspectRatio="xMidYMid meet">
+            <svg viewBox={vbString} width="100%" style={{ display: 'block', maxHeight: `${height}px` }} preserveAspectRatio="xMidYMid meet">
                 {features.map((feat, i) => (
                     <path key={i} d={pathGenerator(feat) || ''} fill="#111827" stroke="#4b5563" strokeWidth={borderWidth} />
                 ))}

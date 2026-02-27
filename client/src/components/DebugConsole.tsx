@@ -3,19 +3,26 @@ import { debugLogger } from '../utils/debugLogger';
 import { X, Trash2 } from 'lucide-react';
 
 export default function DebugConsole() {
-    const [isVisible, setIsVisible] = useState(localStorage.getItem('debug_mode_enabled') === 'true');
+    const [isVisible, setIsVisible] = useState(
+        localStorage.getItem('debug_console_visible') === 'true' ||
+        (localStorage.getItem('debug_mode_enabled') === 'true' && localStorage.getItem('debug_console_visible') !== 'false')
+    );
     const [logs, setLogs] = useState(debugLogger.getLogs());
     const logsEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         // Listen for localStorage changes (e.g. from Settings)
         const handleStorageChange = () => {
-            setIsVisible(localStorage.getItem('debug_mode_enabled') === 'true');
+            const isDebugMode = localStorage.getItem('debug_mode_enabled') === 'true';
+            const isConsoleVisible = localStorage.getItem('debug_console_visible') !== 'false';
+            setIsVisible(isDebugMode && isConsoleVisible);
         };
 
         // Custom event for same-window updates
         const handleDebugModeToggle = () => {
-            setIsVisible(localStorage.getItem('debug_mode_enabled') === 'true');
+            const isDebugMode = localStorage.getItem('debug_mode_enabled') === 'true';
+            const isConsoleVisible = localStorage.getItem('debug_console_visible') !== 'false';
+            setIsVisible(isDebugMode && isConsoleVisible);
         };
 
         window.addEventListener('storage', handleStorageChange);
@@ -98,11 +105,11 @@ export default function DebugConsole() {
                     </button>
                     <button
                         onClick={() => {
-                            localStorage.removeItem('debug_mode_enabled');
+                            localStorage.setItem('debug_console_visible', 'false');
                             setIsVisible(false);
-                            window.dispatchEvent(new Event('debug_mode_changed'));
+                            window.dispatchEvent(new Event('storage'));
                         }}
-                        title="Close Debug Mode"
+                        title="Hide Debug Console"
                         style={{
                             background: 'transparent',
                             border: 'none',

@@ -1,12 +1,9 @@
 import { useMemo } from 'react';
-import { geoAlbersUsa, geoPath, GeoPermissibleObjects } from 'd3-geo';
+import { geoAlbersUsa, geoPath } from 'd3-geo';
 import { feature } from 'topojson-client';
-// @ts-ignore – JSON import from node_modules (us-atlas ships .json files)
-import usTopology from 'us-atlas/states-10m.json';
 import cities from '../data/us-cities.json';
 import gazetteerCities from '../data/us-gazetteer-places.json';
-
-/* ─── types ───────────────────────────────────────────────────────── */
+import usTopology from 'us-atlas/states-10m.json';/* ─── types ───────────────────────────────────────────────────────── */
 
 interface CityEntry {
   c: string;   // city name
@@ -38,13 +35,7 @@ const allGazetteer = gazetteerCities as CityEntry[];
 const projection = geoAlbersUsa().scale(1070).translate([480, 250]);
 const pathGenerator = geoPath(projection);
 
-/* ─── extract GeoJSON from TopoJSON once ──────────────────────────── */
-
-// topojson-client feature() with proper typing
-const statesGeo = (() => {
-  const topo: any = usTopology;
-  return feature(topo, topo.objects.states) as any;
-})();
+const statesGeo = feature(usTopology as any, (usTopology as any).objects.states) as any;
 
 /* ─── location matching ───────────────────────────────────────────── */
 
@@ -179,8 +170,8 @@ function matchInList(list: CityEntry[], raw: string): CityEntry[] {
   return results;
 }
 
-function matchLocation(location?: string): { best: CityEntry | null; candidates: CityEntry[] } {
-  if (!location) return { best: null, candidates: [] };
+function matchLocation(location?: string, allCities?: CityEntry[], allGazetteer?: CityEntry[]): { best: CityEntry | null; candidates: CityEntry[] } {
+  if (!location || !allCities || !allGazetteer) return { best: null, candidates: [] };
   const raw = location.trim();
   if (!raw || /^remote$/i.test(raw)) return { best: null, candidates: [] };
 
@@ -197,7 +188,7 @@ function matchLocation(location?: string): { best: CityEntry | null; candidates:
 
 /* ─── nearby major cities for reference labels ─────────────────────── */
 
-function findNearbyMajors(target: CityEntry): CityEntry[] {
+function findNearbyMajors(target: CityEntry, allCities: CityEntry[]): CityEntry[] {
   const majors = allCities.filter(c => c.p >= MAJOR_POP && !(c.c === target.c && c.s === target.s));
   const withDist = majors.map(c => {
     const dlat = c.la - target.la;
@@ -251,7 +242,7 @@ function calcViewBox(
 /* ─── component ───────────────────────────────────────────────────── */
 
 export default function USMap({ location, height = 200 }: USMapProps) {
-  const { best } = useMemo(() => matchLocation(location), [location]);
+  const { best } = useMemo(() => matchLocation(location || '', allCities || [], allGazetteer || []), [location]);
   const active = best;
 
   const targetXY = useMemo(() => {
@@ -260,8 +251,8 @@ export default function USMap({ location, height = 200 }: USMapProps) {
   }, [active]);
 
   const nearbyMajors = useMemo(() => {
-    if (!active) return [];
-    return findNearbyMajors(active);
+    if (!active || !allCities) return [];
+    return findNearbyMajors(active, allCities);
   }, [active]);
 
   const refXYs = useMemo(
@@ -371,7 +362,7 @@ export default function USMap({ location, height = 200 }: USMapProps) {
         preserveAspectRatio="xMidYMid meet"
       >
         {/* State outlines */}
-        {(statesGeo.features as any[]).map((feat: GeoPermissibleObjects, i: number) => (
+        {statesGeo && (statesGeo.features as any[]).map((feat: any, i: number) => (
           <path
             key={i}
             d={pathGenerator(feat) || ''}

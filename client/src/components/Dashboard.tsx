@@ -37,6 +37,7 @@ interface Contact {
   company_dark_logo_bg?: boolean;
   linkedin_url?: string;
   nearest_reminder?: string;
+  is_prospective?: number;
 }
 
 interface Settings {
@@ -417,7 +418,12 @@ export default function Dashboard() {
                       />
                     </div>
                   )}
-                  <p style={{ color: '#e5e7eb', fontSize: '0.9rem', margin: 0 }}>{contact.name}</p>
+                  <p style={{ color: '#e5e7eb', fontSize: '0.9rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    {contact.name}
+                    {!!contact.is_prospective && (
+                      <span style={{ width: '6px', height: '6px', backgroundColor: '#3b82f6', borderRadius: '50%' }} title="Prospective" />
+                    )}
+                  </p>
                   {contact.company_name && (
                     <p style={{ color: '#9ca3af', fontSize: '0.75rem', margin: 0 }}>{contact.company_name}</p>
                   )}

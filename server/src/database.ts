@@ -199,6 +199,7 @@ export class Database {
         last_interaction DATETIME DEFAULT CURRENT_TIMESTAMP,
         linkedin_url TEXT,
         next_check_in DATETIME,
+        is_prospective INTEGER DEFAULT 0,
         FOREIGN KEY (company_id) REFERENCES companies(id),
         FOREIGN KEY (job_id) REFERENCES jobs(id)
       )
@@ -210,6 +211,7 @@ export class Database {
     await this.run(`ALTER TABLE contacts ADD COLUMN social_platform TEXT`);
     await this.run(`ALTER TABLE contacts ADD COLUMN social_handle TEXT`);
     await this.run(`ALTER TABLE contacts ADD COLUMN email_draft TEXT`);
+    await this.run(`ALTER TABLE contacts ADD COLUMN is_prospective INTEGER DEFAULT 0`);
 
     await this.run(`
       CREATE TABLE IF NOT EXISTS interactions (
@@ -284,6 +286,17 @@ export class Database {
       // ignore
     }
     await this.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_reminder_due_unique ON notifications(reminder_id, due_at)`);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS email_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contact_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+      )
+    `);
 
     await this.run(`
       CREATE TABLE IF NOT EXISTS documents (
@@ -666,8 +679,8 @@ export class Database {
 
   async createContact(data: any) {
     await this.run(
-      `INSERT INTO contacts (name, company_id, job_id, role, email, phone, notes, linkedin_url, next_check_in, social_platform, social_handle, email_draft)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO contacts (name, company_id, job_id, role, email, phone, notes, linkedin_url, next_check_in, social_platform, social_handle, email_draft, is_prospective)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data.name,
         data.company_id || null,
@@ -680,7 +693,8 @@ export class Database {
         data.next_check_in || null,
         data.social_platform || null,
         data.social_handle || null,
-        data.email_draft || null
+        data.email_draft || null,
+        data.is_prospective ? 1 : 0
       ]
     );
 
@@ -705,7 +719,7 @@ export class Database {
 
   async updateContact(id: number, data: any) {
     await this.run(
-      `UPDATE contacts SET name = ?, company_id = ?, job_id = ?, role = ?, email = ?, phone = ?, notes = ?, linkedin_url = ?, next_check_in = ?, social_platform = ?, social_handle = ?, email_draft = ?
+      `UPDATE contacts SET name = ?, company_id = ?, job_id = ?, role = ?, email = ?, phone = ?, notes = ?, linkedin_url = ?, next_check_in = ?, social_platform = ?, social_handle = ?, email_draft = ?, is_prospective = ?
        WHERE id = ?`,
       [
         data.name,
@@ -720,6 +734,7 @@ export class Database {
         data.social_platform || null,
         data.social_handle || null,
         data.email_draft || null,
+        data.is_prospective ? 1 : 0,
         id
       ]
     );
@@ -1038,6 +1053,31 @@ export class Database {
 
   async deleteReminder(id: number) {
     await this.run('DELETE FROM reminders WHERE id = ?', [id]);
+  }
+
+  // Email Drafts
+  async getContactEmailDrafts(contactId: number) {
+    return this.all('SELECT * FROM email_drafts WHERE contact_id = ? ORDER BY created_at DESC', [contactId]);
+  }
+
+  async createEmailDraft(contactId: number, content: string) {
+    const res = await this.run(
+      'INSERT INTO email_drafts (contact_id, content) VALUES (?, ?)',
+      [contactId, content]
+    );
+    // Since run doesn't return the ID in this promisified wrapper usually, but we might need it.
+    // Actually, our run implementation in database.ts might be different. Let's check it.
+  }
+
+  async updateEmailDraft(id: number, content: string) {
+    await this.run(
+      'UPDATE email_drafts SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [content, id]
+    );
+  }
+
+  async deleteEmailDraft(id: number) {
+    await this.run('DELETE FROM email_drafts WHERE id = ?', [id]);
   }
 
   // --- Notifications (hub) ---

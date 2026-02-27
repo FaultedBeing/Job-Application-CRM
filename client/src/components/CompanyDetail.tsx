@@ -107,6 +107,7 @@ interface Contact {
   phone?: string;
   linkedin_url?: string;
   nearest_reminder?: string;
+  is_prospective?: number;
 }
 
 function ReminderCard({ reminder, onDelete }: { reminder: any, onDelete: (id: number) => void }) {
@@ -786,8 +787,22 @@ export default function CompanyDetail() {
                     >
                       <div>
                         <p style={{ fontWeight: 'bold' }}>
-                          <span style={{ color: '#e5e7eb', textDecoration: 'none' }}>
+                          <span style={{ color: '#e5e7eb', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                             {contact.name}
+                            {!!contact.is_prospective && (
+                              <span style={{
+                                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                color: '#60a5fa',
+                                fontSize: '0.6rem',
+                                fontWeight: 'bold',
+                                padding: '1px 4px',
+                                borderRadius: '3px',
+                                border: '1px solid rgba(59, 130, 246, 0.2)',
+                                textTransform: 'uppercase'
+                              }}>
+                                Prospective
+                              </span>
+                            )}
                           </span>
                         </p>
                         {contact.nearest_reminder && (

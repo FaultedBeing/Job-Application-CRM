@@ -16,11 +16,18 @@ export default function Settings() {
   const [showJobMap, setShowJobMap] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('');
   const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; confirmLabel?: string; confirmColor?: string; onConfirm: () => void } | null>(null);
 
   useEffect(() => {
     loadSettings().then(() => setInitialLoaded(true));
     setShowDebugSettings(localStorage.getItem('debug_mode_enabled') === 'true');
+    // Fetch dynamic app version from main process
+    if (window.electronAPI?.getAppVersion) {
+      window.electronAPI.getAppVersion().then(setAppVersion).catch(console.error);
+    } else {
+      setAppVersion('Web (dev)');
+    }
   }, []);
 
   // Auto-save logic
@@ -292,9 +299,20 @@ export default function Settings() {
           onChange={(e) => {
             const val = e.target.value;
             if (val.toLowerCase() === 'pizzapie') {
-              setShowDebugSettings(true);
-              localStorage.setItem('debug_mode_enabled', 'true');
-              showToast('Debug mode activated! Check settings below.', 'info');
+              if (localStorage.getItem('debug_mode_enabled') !== 'true') {
+                setShowDebugSettings(true);
+                localStorage.setItem('debug_mode_enabled', 'true');
+                showToast('Debug mode activated! Check settings below.', 'info');
+                window.dispatchEvent(new Event('debug_mode_changed'));
+              }
+            } else {
+              if (localStorage.getItem('debug_mode_enabled') === 'true') {
+                setShowDebugSettings(false);
+                localStorage.removeItem('debug_mode_enabled');
+                localStorage.removeItem('debug_console_visible');
+                showToast('Debug mode disabled.', 'info');
+                window.dispatchEvent(new Event('debug_mode_changed'));
+              }
             }
             setUsername(val);
           }}
@@ -562,7 +580,7 @@ export default function Settings() {
               </div>
 
               <div style={{ display: 'flex', gap: '0.75rem' }}>
-                {!downloaded && !downloadProgress && !updateError && (
+                {!downloaded && !downloadProgress && !updateError && !updateInfo?.isLocal && (
                   <button
                     onClick={() => window.electronAPI.downloadUpdate()}
                     style={{
@@ -579,7 +597,12 @@ export default function Settings() {
                     Download Update
                   </button>
                 )}
-                {downloaded && (
+                {updateInfo?.isLocal && !updateError && (
+                  <div style={{ fontSize: '0.85rem', color: '#fbbf24', fontStyle: 'italic', display: 'flex', alignItems: 'center' }}>
+                    Local build detected. Run the installer manually.
+                  </div>
+                )}
+                {downloaded && !updateInfo?.isLocal && (
                   <button
                     onClick={() => window.electronAPI.quitAndInstallUpdate()}
                     style={{
@@ -616,7 +639,31 @@ export default function Settings() {
         <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginTop: '0.5rem' }}>
           When enabled, the app will check for pre-release versions (beta, alpha, etc.) in addition to stable releases.
         </p>
-        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>Version v2.1.3</p>
+        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+          Version {appVersion ? (appVersion.startsWith('v') || appVersion.startsWith('W') ? appVersion : `v${appVersion}`) : ''}
+        </p>
+        {showDebugSettings && (
+          <button
+            onClick={() => {
+              localStorage.setItem('debug_console_visible', 'true');
+              window.dispatchEvent(new Event('storage'));
+              // Show notification to confirm
+              alert("Debug console restored. It will appear at the bottom of the screen.");
+            }}
+            style={{
+              backgroundColor: '#374151',
+              color: '#fff',
+              border: '1px solid #4b5563',
+              padding: '0.25rem 0.6rem',
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              marginTop: '0.5rem',
+              cursor: 'pointer'
+            }}
+          >
+            Display Debug Console 🛠️
+          </button>
+        )}
       </section>
 
       {/* Debug Settings (Hidden by default, unlocked by "pizzapie") */}

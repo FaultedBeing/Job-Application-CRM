@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect, Suspense, lazy } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
-import { ArrowLeft, Edit, Plus, Upload, Trash2, ExternalLink, Pencil, Check, X, Bell } from 'lucide-react';
-import LocationMap from './LocationMap';
+import { ArrowLeft, Edit, Plus, Upload, Trash2, ExternalLink, Bell, Pencil, Check, X } from 'lucide-react';
+// import LocationMap from './LocationMap';
+const LocationMap = lazy(() => import('./LocationMap'));
 import ConfirmDialog from './ConfirmDialog';
 import AlertDialog from './AlertDialog';
 import { debugLog } from '../utils/debugLogger';
@@ -34,6 +35,7 @@ interface Contact {
   phone: string;
   linkedin_url?: string;
   nearest_reminder?: string;
+  is_prospective?: number;
 }
 
 interface Interaction {
@@ -640,7 +642,11 @@ export default function JobDetail() {
                   <div style={{ color: job.location ? '#e5e7eb' : '#6b7280', marginTop: '0.5rem' }}>
                     {job.location || '—'}
                   </div>
-                  {job.location && showJobMap && <LocationMap location={job.location} height={220} />}
+                  {job.location && showJobMap && (
+                    <Suspense fallback={<div style={{ height: '220px', backgroundColor: '#0f1115', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '0.875rem' }}>Loading Map...</div>}>
+                      <LocationMap location={job.location} height={220} />
+                    </Suspense>
+                  )}
                 </div>
                 {job.link && (
                   <div style={{ marginBottom: '1rem' }}>
@@ -861,6 +867,7 @@ export default function JobDetail() {
                     {contacts.map((contact) => (
                       <div
                         key={contact.id}
+                        onClick={() => navigate(`/contacts/${contact.id}`)}
                         style={{
                           padding: '1rem',
                           marginBottom: '0.5rem',
@@ -868,17 +875,30 @@ export default function JobDetail() {
                           borderRadius: '6px',
                           display: 'flex',
                           justifyContent: 'space-between',
-                          gap: '0.75rem'
+                          gap: '0.75rem',
+                          cursor: 'pointer'
                         }}
                       >
                         <div>
                           <p style={{ fontWeight: 'bold' }}>
-                            <Link
-                              to={`/contacts/${contact.id}`}
-                              style={{ color: '#e5e7eb', textDecoration: 'none', fontWeight: 'bold' }}
-                            >
+                            <span style={{ color: '#e5e7eb', textDecoration: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                               {contact.name}
-                            </Link>
+                              {!!contact.is_prospective && (
+                                <span style={{
+                                  backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                  color: '#60a5fa',
+                                  fontSize: '0.6rem',
+                                  fontWeight: 'bold',
+                                  padding: '1px 4px',
+                                  borderRadius: '3px',
+                                  border: '1px solid rgba(59, 130, 246, 0.2)',
+                                  textTransform: 'uppercase',
+                                  flexShrink: 0
+                                }}>
+                                  Prospective
+                                </span>
+                              )}
+                            </span>
                             {contact.nearest_reminder && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', fontSize: '0.7rem', marginTop: '0.2rem' }}>
                                 <Bell size={10} />
@@ -888,7 +908,7 @@ export default function JobDetail() {
                           </p>
                           {contact.role && <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{contact.role}</p>}
                           {contact.email && (
-                            <a href={`mailto:${contact.email}`} style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}>
+                            <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()} style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}>
                               {contact.email}
                             </a>
                           )}
@@ -898,6 +918,7 @@ export default function JobDetail() {
                               href={contact.linkedin_url}
                               target="_blank"
                               rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
                               style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}
                             >
                               LinkedIn Profile

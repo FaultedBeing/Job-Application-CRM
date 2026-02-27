@@ -4,6 +4,7 @@ import { Info, X, Download, RefreshCw } from 'lucide-react';
 declare global {
     interface Window {
         electronAPI: {
+            getAppVersion: () => Promise<string>;
             onUpdateAvailable: (callback: (info: any) => void) => void;
             onUpdateDownloaded: (callback: (info: any) => void) => void;
             onDownloadProgress: (callback: (progress: any) => void) => void;
