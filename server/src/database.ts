@@ -151,7 +151,8 @@ export class Database {
         last_interaction DATETIME DEFAULT CURRENT_TIMESTAMP,
         logo_url TEXT,
         employee_count INTEGER,
-        company_size TEXT
+        company_size TEXT,
+        financial_stability_warning INTEGER DEFAULT 0
       )
     `);
 
@@ -162,6 +163,7 @@ export class Database {
     await this.run(`ALTER TABLE companies ADD COLUMN location TEXT`);
     await this.run(`ALTER TABLE companies ADD COLUMN no_posted_jobs INTEGER DEFAULT 0`);
     await this.run(`ALTER TABLE companies ADD COLUMN no_appropriate_jobs INTEGER DEFAULT 0`);
+    await this.run(`ALTER TABLE companies ADD COLUMN financial_stability_warning INTEGER DEFAULT 0`);
 
     await this.run(`
       CREATE TABLE IF NOT EXISTS jobs (
@@ -205,6 +207,9 @@ export class Database {
     // Add new columns if they don't exist (migration)
     await this.run(`ALTER TABLE contacts ADD COLUMN linkedin_url TEXT`);
     await this.run(`ALTER TABLE contacts ADD COLUMN next_check_in DATETIME`);
+    await this.run(`ALTER TABLE contacts ADD COLUMN social_platform TEXT`);
+    await this.run(`ALTER TABLE contacts ADD COLUMN social_handle TEXT`);
+    await this.run(`ALTER TABLE contacts ADD COLUMN email_draft TEXT`);
 
     await this.run(`
       CREATE TABLE IF NOT EXISTS interactions (
@@ -387,7 +392,8 @@ export class Database {
     return companies.map((c: any) => ({
       ...c,
       job_count: c.job_count || 0,
-      dark_logo_bg: Boolean(c.dark_logo_bg)
+      dark_logo_bg: Boolean(c.dark_logo_bg),
+      financial_stability_warning: Boolean(c.financial_stability_warning)
     }));
   }
 
@@ -406,7 +412,8 @@ export class Database {
     if (!c) return c;
     return {
       ...c,
-      dark_logo_bg: Boolean(c.dark_logo_bg)
+      dark_logo_bg: Boolean(c.dark_logo_bg),
+      financial_stability_warning: Boolean(c.financial_stability_warning)
     };
   }
 
@@ -441,16 +448,16 @@ export class Database {
 
   async createCompany(data: any) {
     await this.run(
-      'INSERT INTO companies (name, website, industry, notes, location, dark_logo_bg, no_posted_jobs, no_appropriate_jobs, logo_url, employee_count, company_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null]
+      'INSERT INTO companies (name, website, industry, notes, location, dark_logo_bg, no_posted_jobs, no_appropriate_jobs, financial_stability_warning, logo_url, employee_count, company_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.financial_stability_warning ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null]
     );
     return await this.get('SELECT * FROM companies WHERE name = ?', [data.name]);
   }
 
   async updateCompany(id: number, data: any) {
     await this.run(
-      'UPDATE companies SET name = ?, website = ?, industry = ?, notes = ?, location = ?, dark_logo_bg = ?, no_posted_jobs = ?, no_appropriate_jobs = ?, logo_url = ?, employee_count = ?, company_size = ? WHERE id = ?',
-      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null, id]
+      'UPDATE companies SET name = ?, website = ?, industry = ?, notes = ?, location = ?, dark_logo_bg = ?, no_posted_jobs = ?, no_appropriate_jobs = ?, financial_stability_warning = ?, logo_url = ?, employee_count = ?, company_size = ? WHERE id = ?',
+      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.financial_stability_warning ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null, id]
     );
     return await this.getCompany(id);
   }
@@ -659,8 +666,8 @@ export class Database {
 
   async createContact(data: any) {
     await this.run(
-      `INSERT INTO contacts (name, company_id, job_id, role, email, phone, notes, linkedin_url, next_check_in)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO contacts (name, company_id, job_id, role, email, phone, notes, linkedin_url, next_check_in, social_platform, social_handle, email_draft)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data.name,
         data.company_id || null,
@@ -670,7 +677,10 @@ export class Database {
         data.phone || null,
         data.notes || null,
         data.linkedin_url || null,
-        data.next_check_in || null
+        data.next_check_in || null,
+        data.social_platform || null,
+        data.social_handle || null,
+        data.email_draft || null
       ]
     );
 
@@ -695,7 +705,7 @@ export class Database {
 
   async updateContact(id: number, data: any) {
     await this.run(
-      `UPDATE contacts SET name = ?, company_id = ?, job_id = ?, role = ?, email = ?, phone = ?, notes = ?, linkedin_url = ?, next_check_in = ?
+      `UPDATE contacts SET name = ?, company_id = ?, job_id = ?, role = ?, email = ?, phone = ?, notes = ?, linkedin_url = ?, next_check_in = ?, social_platform = ?, social_handle = ?, email_draft = ?
        WHERE id = ?`,
       [
         data.name,
@@ -707,6 +717,9 @@ export class Database {
         data.notes || null,
         data.linkedin_url || null,
         data.next_check_in || null,
+        data.social_platform || null,
+        data.social_handle || null,
+        data.email_draft || null,
         id
       ]
     );
@@ -1119,9 +1132,10 @@ export class Database {
 
   async listNotifications(limit = 50, offset = 0) {
     return await this.all(
-      `SELECT n.*, r.contact_id
+      `SELECT n.*, r.contact_id, c.name as contact_name
        FROM notifications n
        LEFT JOIN reminders r ON n.reminder_id = r.id
+       LEFT JOIN contacts c ON r.contact_id = c.id
        WHERE n.dismissed_at IS NULL
        ORDER BY
          CASE WHEN n.read_at IS NULL THEN 0 ELSE 1 END,

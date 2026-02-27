@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSessionStorage } from '../utils/useSessionStorage';
 import { Link } from 'react-router-dom';
 import api from '../api';
-import { Search, Bell, Upload, Download } from 'lucide-react';
+import { Search, Bell, Upload, Download, Filter, ChevronUp, ChevronDown, AlertTriangle } from 'lucide-react';
 import AlertDialog from './AlertDialog';
 import { debugLog } from '../utils/debugLogger';
 
@@ -21,15 +22,25 @@ interface Company {
   no_appropriate_jobs?: boolean;
   location?: string;
   nearest_reminder?: string;
+  financial_stability_warning?: boolean;
 }
 
 export default function Companies() {
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [sortBy, setSortBy] = useState<'recent' | 'name' | 'jobs' | 'industry'>('recent');
+  const [sortBy, setSortBy] = useSessionStorage<'recent' | 'name' | 'jobs' | 'industry'>('companies_sortBy', 'recent');
   const [showAddModal, setShowAddModal] = useState(false);
   const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [importing, setImporting] = useState(false);
+  const [sortOrder, setSortOrder] = useSessionStorage<'asc' | 'desc'>('companies_sortOrder', 'desc');
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({
+    noPostedJobs: false,
+    noAppropriateJobs: false,
+    questionableFunds: false,
+    industry: '',
+    size: ''
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -109,28 +120,51 @@ export default function Companies() {
       );
     }
 
+    // Apply advanced filters
+    if (filters.noPostedJobs) {
+      result = result.filter(c => c.no_posted_jobs);
+    }
+    if (filters.noAppropriateJobs) {
+      result = result.filter(c => c.no_appropriate_jobs);
+    }
+    if (filters.questionableFunds) {
+      result = result.filter(c => c.financial_stability_warning);
+    }
+    if (filters.industry) {
+      result = result.filter(c => c.industry === filters.industry);
+    }
+    if (filters.size) {
+      result = result.filter(c => c.company_size === filters.size);
+    }
+
     result.sort((a, b) => {
+      let comparison = 0;
       if (sortBy === 'name') {
-        return a.name.localeCompare(b.name);
+        comparison = a.name.localeCompare(b.name);
+      } else if (sortBy === 'jobs') {
+        comparison = (a.job_count || 0) - (b.job_count || 0);
+      } else if (sortBy === 'industry') {
+        comparison = (a.industry || '').localeCompare(b.industry || '');
+      } else {
+        const aTime = a.last_interaction ? new Date(a.last_interaction).getTime() : 0;
+        const bTime = b.last_interaction ? new Date(b.last_interaction).getTime() : 0;
+        comparison = aTime - bTime;
       }
-      if (sortBy === 'jobs') {
-        return (b.job_count || 0) - (a.job_count || 0);
-      }
-      if (sortBy === 'industry') {
-        return (a.industry || '').localeCompare(b.industry || '');
-      }
-      const aTime = a.last_interaction ? new Date(a.last_interaction).getTime() : 0;
-      const bTime = b.last_interaction ? new Date(b.last_interaction).getTime() : 0;
-      return bTime - aTime;
+      return sortOrder === 'asc' ? comparison : -comparison;
     });
 
     return result;
-  }, [companies, sortBy, searchTerm]);
+  }, [companies, sortBy, sortOrder, searchTerm, filters]);
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-        <h1 style={{ fontSize: '2rem', color: '#fbbf24' }}>Companies</h1>
+        <h1 style={{ fontSize: '2rem', color: '#fbbf24', display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
+          Companies
+          <span style={{ fontSize: '1rem', color: '#9ca3af', fontWeight: 'normal' }}>
+            ({companies.length})
+          </span>
+        </h1>
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
           <input
             ref={fileInputRef}
@@ -197,45 +231,193 @@ export default function Companies() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem' }}>
-        <div style={{ position: 'relative', flex: 1 }}>
-          <Search size={20} style={{ position: 'absolute', left: '12px', top: '10px', color: '#9ca3af' }} />
-          <input
-            type="text"
-            placeholder="Search companies by name or industry..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+      {/* Filters & Search */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <Search size={20} style={{ position: 'absolute', left: '12px', top: '10px', color: '#9ca3af' }} />
+            <input
+              type="text"
+              placeholder="Search companies by name or industry..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.6rem 1rem 0.6rem 2.5rem',
+                backgroundColor: '#1a1d24',
+                border: '1px solid #2d3139',
+                borderRadius: '6px',
+                color: '#e5e7eb',
+                fontSize: '0.95rem'
+              }}
+            />
+          </div>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
             style={{
-              width: '100%',
-              padding: '0.6rem 1rem 0.6rem 2.5rem',
-              backgroundColor: '#1a1d24',
-              border: '1px solid #2d3139',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.6rem 1rem',
+              backgroundColor: showFilters ? '#fbbf2420' : '#1a1d24',
+              border: '1px solid',
+              borderColor: showFilters ? '#fbbf24' : '#2d3139',
               borderRadius: '6px',
-              color: '#e5e7eb',
-              fontSize: '0.95rem'
+              color: showFilters ? '#fbbf24' : '#9ca3af',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
             }}
-          />
+          >
+            <Filter size={18} />
+            Filters
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              style={{
+                padding: '0.6rem 2.5rem 0.6rem 1rem',
+                backgroundColor: '#1a1d24',
+                border: '1px solid #2d3139',
+                borderRadius: '6px',
+                color: '#e5e7eb',
+                fontSize: '0.95rem',
+                cursor: 'pointer',
+                minWidth: '210px',
+                appearance: 'none',
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 0.75rem center',
+                backgroundSize: '1rem'
+              }}
+            >
+              <option value="recent">Sort by Recent Activity</option>
+              <option value="name">Sort by Name</option>
+              <option value="jobs">Sort by Job Count</option>
+              <option value="industry">Sort by Industry</option>
+            </select>
+            <button
+              onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+              title={sortOrder === 'asc' ? 'Sort Ascending' : 'Sort Descending'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '40px',
+                height: '40px',
+                backgroundColor: '#1a1d24',
+                border: '1px solid #2d3139',
+                borderRadius: '6px',
+                color: '#fbbf24',
+                cursor: 'pointer'
+              }}
+            >
+              {sortOrder === 'asc' ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+            </button>
+          </div>
         </div>
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as any)}
-          style={{
-            padding: '0.6rem 1rem',
+
+        {showFilters && (
+          <div style={{
+            padding: '1.25rem',
             backgroundColor: '#1a1d24',
             border: '1px solid #2d3139',
-            borderRadius: '6px',
-            color: '#e5e7eb',
-            fontSize: '0.95rem',
-            cursor: 'pointer',
-            minWidth: '210px'
-          }}
-        >
-          <option value="recent">Sort by Recent Activity</option>
-          <option value="name">Sort by Name (A–Z)</option>
-          <option value="jobs">Sort by Job Count</option>
-          <option value="industry">Sort by Industry</option>
-        </select>
+            borderRadius: '8px',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '1.5rem'
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <label style={{ color: '#9ca3af', fontSize: '0.85rem', fontWeight: 'bold', textTransform: 'uppercase' }}>Flags</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e5e7eb', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={filters.noPostedJobs}
+                  onChange={(e) => setFilters({ ...filters, noPostedJobs: e.target.checked })}
+                />
+                No Posted Jobs
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e5e7eb', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={filters.noAppropriateJobs}
+                  onChange={(e) => setFilters({ ...filters, noAppropriateJobs: e.target.checked })}
+                />
+                No Appropriate Jobs
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e5e7eb', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={filters.questionableFunds}
+                  onChange={(e) => setFilters({ ...filters, questionableFunds: e.target.checked })}
+                />
+                Questionable Funds
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <label style={{ color: '#9ca3af', fontSize: '0.85rem', fontWeight: 'bold', textTransform: 'uppercase' }}>Industry</label>
+              <select
+                value={filters.industry}
+                onChange={(e) => setFilters({ ...filters, industry: e.target.value })}
+                style={{
+                  padding: '0.5rem',
+                  backgroundColor: '#0f1115',
+                  border: '1px solid #2d3139',
+                  borderRadius: '4px',
+                  color: '#e5e7eb'
+                }}
+              >
+                <option value="">All Industries</option>
+                {Array.from(new Set(companies.map(c => c.industry).filter(Boolean))).map(ind => (
+                  <option key={ind} value={ind!}>{ind}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <label style={{ color: '#9ca3af', fontSize: '0.85rem', fontWeight: 'bold', textTransform: 'uppercase' }}>Company Size</label>
+              <select
+                value={filters.size}
+                onChange={(e) => setFilters({ ...filters, size: e.target.value })}
+                style={{
+                  padding: '0.5rem',
+                  backgroundColor: '#0f1115',
+                  border: '1px solid #2d3139',
+                  borderRadius: '4px',
+                  color: '#e5e7eb'
+                }}
+              >
+                <option value="">All Sizes</option>
+                <option value="1–10">1–10</option>
+                <option value="11–50">11–50</option>
+                <option value="51–200">51–200</option>
+                <option value="201–500">201–500</option>
+                <option value="501–1000">501–1000</option>
+                <option value="1001–5000">1001–5000</option>
+                <option value="5001–10000">5001–10000</option>
+                <option value="10001+">10001+</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setFilters({ noPostedJobs: false, noAppropriateJobs: false, questionableFunds: false, industry: '', size: '' })}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #4b5563',
+                  borderRadius: '4px',
+                  color: '#9ca3af',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem'
+                }}
+              >
+                Clear All
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
@@ -326,6 +508,24 @@ export default function Companies() {
                       No Appropriate Jobs
                     </span>
                   )}
+                  {!!company.financial_stability_warning && (
+                    <span style={{
+                      display: 'inline-flex',
+                      padding: '0.15rem 0.5rem',
+                      borderRadius: '999px',
+                      backgroundColor: 'rgba(239, 68, 68, 0.25)',
+                      color: '#f87171',
+                      fontSize: '0.65rem',
+                      fontWeight: 700,
+                      border: '1px solid #f87171',
+                      whiteSpace: 'nowrap',
+                      alignItems: 'center',
+                      gap: '0.25rem'
+                    }}>
+                      <AlertTriangle size={10} />
+                      Questionable Funds
+                    </span>
+                  )}
                 </div>
                 {company.nearest_reminder && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', backgroundColor: '#fbbf2420', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem', flexShrink: 0 }} title="Upcoming Reminder">
@@ -405,7 +605,8 @@ function AddCompanyModal({ onClose, onSave }: { onClose: () => void; onSave: (da
     industry: '',
     location: '',
     notes: '',
-    company_size: ''
+    company_size: '',
+    financial_stability_warning: false
   });
   const [industryOptions, setIndustryOptions] = useState<string[]>([]);
 
@@ -454,6 +655,7 @@ function AddCompanyModal({ onClose, onSave }: { onClose: () => void; onSave: (da
       location: formData.location.trim() ? formData.location.trim() : null,
       notes: formData.notes || null,
       company_size: formData.company_size || null,
+      financial_stability_warning: formData.financial_stability_warning ? 1 : 0,
       employee_count: null
     });
   }
@@ -600,6 +802,20 @@ function AddCompanyModal({ onClose, onSave }: { onClose: () => void; onSave: (da
                 minHeight: '80px'
               }}
             />
+          </div>
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#f87171', fontWeight: 'bold', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                style={{ width: '18px', height: '18px' }}
+                checked={formData.financial_stability_warning}
+                onChange={(e) => setFormData({ ...formData, financial_stability_warning: e.target.checked })}
+              />
+              Questionable Funds
+            </label>
+            <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginLeft: '2.4rem', marginTop: '0.25rem' }}>
+              Flag this company as having a potentially unstable financial situation.
+            </p>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1.5rem' }}>
             <button

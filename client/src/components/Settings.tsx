@@ -11,6 +11,8 @@ export default function Settings() {
   const [industries, setIndustries] = useState<string[]>([]);
   const [newIndustry, setNewIndustry] = useState('');
   const [allowPrerelease, setAllowPrerelease] = useState(false);
+  const [enableLocalUpdates, setEnableLocalUpdates] = useState(false);
+  const [showDebugSettings, setShowDebugSettings] = useState(false);
   const [showJobMap, setShowJobMap] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
@@ -18,6 +20,7 @@ export default function Settings() {
 
   useEffect(() => {
     loadSettings().then(() => setInitialLoaded(true));
+    setShowDebugSettings(localStorage.getItem('debug_mode_enabled') === 'true');
   }, []);
 
   // Auto-save logic
@@ -27,7 +30,7 @@ export default function Settings() {
       saveSettings();
     }, 1000);
     return () => clearTimeout(timer);
-  }, [username, statuses, allowPrerelease, showJobMap, initialLoaded]);
+  }, [username, statuses, allowPrerelease, enableLocalUpdates, showJobMap, initialLoaded]);
 
   function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
     setToast({ message, type });
@@ -98,6 +101,10 @@ export default function Settings() {
       const allowPrereleaseStr = res.data.allow_prerelease || 'false';
       setAllowPrerelease(allowPrereleaseStr === 'true');
 
+      // Load enable_local_updates setting
+      const enableLocalUpdatesStr = res.data.enable_local_updates || 'false';
+      setEnableLocalUpdates(enableLocalUpdatesStr === 'true');
+
       // Load job location map toggle (default ON if not set)
       const showJobMapStr = res.data.show_job_map;
       setShowJobMap(showJobMapStr === undefined || showJobMapStr === null ? true : showJobMapStr === 'true');
@@ -107,6 +114,36 @@ export default function Settings() {
     }
   }
 
+  // Update Status state for settings page
+  const [updateInfo, setUpdateInfo] = useState<any>(null);
+  const [downloaded, setDownloaded] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (window.electronAPI) {
+      window.electronAPI.onUpdateAvailable((info) => {
+        setUpdateInfo(info);
+        setUpdateError(null);
+      });
+
+      window.electronAPI.onUpdateDownloaded((info) => {
+        setUpdateInfo(info);
+        setDownloaded(true);
+        setDownloadProgress(null);
+      });
+
+      window.electronAPI.onDownloadProgress((progress) => {
+        setDownloadProgress(progress.percent);
+      });
+
+      window.electronAPI.onUpdateError((err) => {
+        setUpdateError(err);
+        setDownloadProgress(null);
+      });
+    }
+  }, []);
+
   async function saveSettings() {
     try {
       await api.post('/settings', {
@@ -114,6 +151,7 @@ export default function Settings() {
         statuses: statuses.join(','),
         industries: industries.join('|'),
         allow_prerelease: allowPrerelease ? 'true' : 'false',
+        enable_local_updates: enableLocalUpdates ? 'true' : 'false',
         show_job_map: showJobMap ? 'true' : 'false'
       });
       showToast('Settings saved!', 'success');
@@ -254,9 +292,9 @@ export default function Settings() {
           onChange={(e) => {
             const val = e.target.value;
             if (val.toLowerCase() === 'pizzapie') {
-              localStorage.setItem('debug_mode', 'true');
-              window.dispatchEvent(new Event('debug_mode_changed'));
-              showToast('Debug mode activated!', 'info');
+              setShowDebugSettings(true);
+              localStorage.setItem('debug_mode_enabled', 'true');
+              showToast('Debug mode activated! Check settings below.', 'info');
             }
             setUsername(val);
           }}
@@ -484,6 +522,7 @@ export default function Settings() {
           </label>
           <button
             onClick={handleCheckForUpdates}
+            disabled={downloadProgress !== null}
             style={{
               padding: '0.5rem 1.25rem',
               backgroundColor: '#3b82f6',
@@ -491,18 +530,129 @@ export default function Settings() {
               borderRadius: '6px',
               color: '#fff',
               fontWeight: 'bold',
-              cursor: 'pointer',
-              fontSize: '0.9rem'
+              cursor: downloadProgress !== null ? 'not-allowed' : 'pointer',
+              fontSize: '0.9rem',
+              opacity: downloadProgress !== null ? 0.6 : 1
             }}
           >
             Check for Updates
           </button>
         </div>
+
+        {/* Update Status / Actions */}
+        {(updateInfo || updateError) && (
+          <div style={{
+            marginTop: '1.5rem',
+            padding: '1rem',
+            backgroundColor: '#0f1115',
+            borderRadius: '6px',
+            border: `1px solid ${updateError ? '#ef4444' : (downloaded ? '#10b981' : '#2d3139')}`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: updateError ? '#f87171' : (downloaded ? '#10b981' : '#fbbf24'), marginBottom: '0.25rem' }}>
+                  {updateError ? 'Update Error' : (downloaded ? 'Update Ready' : 'Update Available')}
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#e5e7eb' }}>
+                  {updateError ? updateError : (downloaded ? `v${updateInfo.version} is downloaded and ready.` : `A new version v${updateInfo.version} is available.`)}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                {!downloaded && !downloadProgress && !updateError && (
+                  <button
+                    onClick={() => window.electronAPI.downloadUpdate()}
+                    style={{
+                      padding: '0.4rem 0.8rem',
+                      backgroundColor: '#fbbf24',
+                      color: '#0f1115',
+                      border: 'none',
+                      borderRadius: '4px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    Download Update
+                  </button>
+                )}
+                {downloaded && (
+                  <button
+                    onClick={() => window.electronAPI.quitAndInstallUpdate()}
+                    style={{
+                      padding: '0.4rem 0.8rem',
+                      backgroundColor: '#10b981',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    Restart & Install
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {downloadProgress !== null && (
+              <div style={{ width: '100%' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#9ca3af', marginBottom: '0.25rem' }}>
+                  <span>Downloading...</span>
+                  <span>{Math.round(downloadProgress)}%</span>
+                </div>
+                <div style={{ width: '100%', height: '4px', backgroundColor: '#111827', borderRadius: '2px', overflow: 'hidden' }}>
+                  <div style={{ width: `${downloadProgress}%`, height: '100%', backgroundColor: '#fbbf24', transition: 'width 0.2s linear' }} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginTop: '0.5rem' }}>
           When enabled, the app will check for pre-release versions (beta, alpha, etc.) in addition to stable releases.
         </p>
-        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>Version v2.1.0</p>
+        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.25rem' }}>Version v2.1.3</p>
       </section>
+
+      {/* Debug Settings (Hidden by default, unlocked by "pizzapie") */}
+      {showDebugSettings && (
+        <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem', border: '1px dashed #fbbf24' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2 style={{ fontSize: '1.25rem', color: '#fbbf24', margin: 0 }}>Debug Settings 🛠️</h2>
+            <button
+              onClick={() => {
+                setShowDebugSettings(false);
+                localStorage.removeItem('debug_mode_enabled');
+              }}
+              style={{ fontSize: '0.75rem', color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              Hide Debug Settings
+            </button>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', color: '#e5e7eb' }}>
+            <input
+              type="checkbox"
+              checked={enableLocalUpdates}
+              onChange={(e) => setEnableLocalUpdates(e.target.checked)}
+              style={{
+                width: '18px',
+                height: '18px',
+                cursor: 'pointer',
+                accentColor: '#fbbf24'
+              }}
+            />
+            <span>Enable Local Update Check</span>
+          </label>
+          <p style={{ color: '#9ca3af', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+            When enabled, the app will check for update files (latest.yml) in the application folder before checking GitHub. Useful for testing build packages locally.
+          </p>
+        </section>
+      )}
 
       {/* Notifications & Email — link to dedicated page */}
       <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>

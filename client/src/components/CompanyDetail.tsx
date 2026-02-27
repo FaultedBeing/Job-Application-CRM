@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api';
-import { ArrowLeft, Plus, Edit, Trash2, Sun, Bell } from 'lucide-react';
+import { ArrowLeft, Plus, Edit, Trash2, Sun, Bell, AlertTriangle } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import AlertDialog from './AlertDialog';
 import { debugLog } from '../utils/debugLogger';
@@ -19,6 +19,7 @@ interface Company {
   dark_logo_bg?: boolean;
   no_posted_jobs?: boolean;
   no_appropriate_jobs?: boolean;
+  financial_stability_warning?: boolean;
   __follow_up?: { due_at: string; message?: string; notify_desktop?: boolean; notify_email?: boolean } | null;
 }
 
@@ -426,6 +427,24 @@ export default function CompanyDetail() {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', color: '#fbbf24' }}>{company.name}</h1>
+                {!!company.financial_stability_warning && (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                    padding: '0.25rem 0.75rem',
+                    borderRadius: '999px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                    color: '#f87171',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    marginBottom: '0.5rem'
+                  }}>
+                    <AlertTriangle size={14} />
+                    Questionable Funds
+                  </span>
+                )}
                 {!!company.no_posted_jobs && (
                   <span style={{
                     display: 'inline-flex',
@@ -752,6 +771,7 @@ export default function CompanyDetail() {
                   contacts.map((contact) => (
                     <div
                       key={contact.id}
+                      onClick={() => navigate(`/contacts/${contact.id}`)}
                       style={{
                         padding: '1rem',
                         marginBottom: '0.5rem',
@@ -760,17 +780,15 @@ export default function CompanyDetail() {
                         border: '1px solid #2d3139',
                         display: 'flex',
                         justifyContent: 'space-between',
-                        gap: '0.75rem'
+                        gap: '0.75rem',
+                        cursor: 'pointer'
                       }}
                     >
                       <div>
                         <p style={{ fontWeight: 'bold' }}>
-                          <Link
-                            to={`/contacts/${contact.id}`}
-                            style={{ color: '#e5e7eb', textDecoration: 'none' }}
-                          >
+                          <span style={{ color: '#e5e7eb', textDecoration: 'none' }}>
                             {contact.name}
-                          </Link>
+                          </span>
                         </p>
                         {contact.nearest_reminder && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
@@ -780,7 +798,7 @@ export default function CompanyDetail() {
                         )}
                         {contact.role && <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>{contact.role}</p>}
                         {contact.email && (
-                          <a href={`mailto:${contact.email}`} style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}>
+                          <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()} style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}>
                             {contact.email}
                           </a>
                         )}
@@ -790,6 +808,7 @@ export default function CompanyDetail() {
                             href={contact.linkedin_url}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
                             style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}
                           >
                             LinkedIn Profile
@@ -1037,7 +1056,8 @@ function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSa
     location: company.location || '',
     company_size: company.company_size || '',
     dark_logo_bg: company.dark_logo_bg ?? false,
-    logo_url: company.logo_url
+    logo_url: company.logo_url,
+    financial_stability_warning: !!company.financial_stability_warning
   });
   const [industryOptions, setIndustryOptions] = useState<string[]>([]);
   const [isDraggingLogo, setIsDraggingLogo] = useState(false);
@@ -1091,7 +1111,8 @@ function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSa
       company_size: formData.company_size || undefined,
       employee_count: undefined,
       dark_logo_bg: formData.dark_logo_bg,
-      logo_url: formData.logo_url
+      logo_url: formData.logo_url,
+      financial_stability_warning: formData.financial_stability_warning
     });
   }
 
@@ -1310,6 +1331,20 @@ function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSa
           style={{ width: '100%', padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', minHeight: '100px' }}
         />
       </div>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#f87171', fontWeight: 'bold', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            style={{ width: '20px', height: '20px' }}
+            checked={formData.financial_stability_warning}
+            onChange={(e) => setFormData({ ...formData, financial_stability_warning: e.target.checked })}
+          />
+          Questionable Funds
+        </label>
+        <p style={{ fontSize: '0.85rem', color: '#9ca3af', marginLeft: '2.4rem', marginTop: '0.25rem' }}>
+          Flag this company as having a potentially unstable financial situation.
+        </p>
+      </div>
       <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
         <button type="button" onClick={onCancel} style={{ padding: '0.75rem 1.5rem', backgroundColor: 'transparent', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', cursor: 'pointer' }}>
           Cancel
@@ -1436,12 +1471,13 @@ function AddJobModal({ companyName, onClose, onSave }: { companyName: string; on
           </div>
           <div style={{ marginBottom: '1rem' }}>
             <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>
-              Job Link
+              Job Link / Email
             </label>
             <input
-              type="url"
+              type="text"
               value={formData.link}
               onChange={(e) => setFormData({ ...formData, link: e.target.value })}
+              placeholder="https://... or hiring@company.com"
               style={{
                 width: '100%',
                 padding: '0.75rem',

@@ -3,19 +3,19 @@ import { debugLogger } from '../utils/debugLogger';
 import { X, Trash2 } from 'lucide-react';
 
 export default function DebugConsole() {
-    const [isVisible, setIsVisible] = useState(localStorage.getItem('debug_mode') === 'true');
+    const [isVisible, setIsVisible] = useState(localStorage.getItem('debug_mode_enabled') === 'true');
     const [logs, setLogs] = useState(debugLogger.getLogs());
     const logsEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         // Listen for localStorage changes (e.g. from Settings)
         const handleStorageChange = () => {
-            setIsVisible(localStorage.getItem('debug_mode') === 'true');
+            setIsVisible(localStorage.getItem('debug_mode_enabled') === 'true');
         };
 
         // Custom event for same-window updates
         const handleDebugModeToggle = () => {
-            setIsVisible(localStorage.getItem('debug_mode') === 'true');
+            setIsVisible(localStorage.getItem('debug_mode_enabled') === 'true');
         };
 
         window.addEventListener('storage', handleStorageChange);
@@ -98,7 +98,7 @@ export default function DebugConsole() {
                     </button>
                     <button
                         onClick={() => {
-                            localStorage.removeItem('debug_mode');
+                            localStorage.removeItem('debug_mode_enabled');
                             setIsVisible(false);
                             window.dispatchEvent(new Event('debug_mode_changed'));
                         }}

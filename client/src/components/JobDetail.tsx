@@ -646,10 +646,17 @@ export default function JobDetail() {
                   <div style={{ marginBottom: '1rem' }}>
                     <button
                       onClick={() => {
+                        let finalLink = job.link.trim();
+                        if (finalLink.includes('@') && !finalLink.includes('://') && !finalLink.toLowerCase().startsWith('mailto:')) {
+                          finalLink = `mailto:${finalLink}`;
+                        } else if (!finalLink.includes('://') && !finalLink.toLowerCase().startsWith('mailto:')) {
+                          finalLink = `https://${finalLink}`;
+                        }
+
                         if ((window as any).electronAPI?.openExternal) {
-                          (window as any).electronAPI.openExternal(job.link);
+                          (window as any).electronAPI.openExternal(finalLink);
                         } else {
-                          window.open(job.link, '_blank');
+                          window.open(finalLink, '_blank');
                         }
                       }}
                       style={{
@@ -675,10 +682,10 @@ export default function JobDetail() {
                         e.currentTarget.style.backgroundColor = '#1a1d24';
                         e.currentTarget.style.borderColor = '#2d3139';
                       }}
-                      title="Open job posting in browser"
+                      title="Open job posting or email"
                     >
                       <ExternalLink size={16} />
-                      View Job Posting
+                      {job.link.includes('@') && !job.link.includes('://') ? 'Email Application' : 'View Job Posting'}
                     </button>
                   </div>
                 )}
@@ -1127,11 +1134,12 @@ function EditJobForm({ job, onSave, onCancel }: { job: Job; onSave: (job: Job) =
         </select>
       </div>
       <div style={{ marginBottom: '1rem' }}>
-        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>Job Link</label>
+        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>Job Link / Email</label>
         <input
-          type="url"
+          type="text"
           value={formData.link || ''}
           onChange={(e) => setFormData({ ...formData, link: e.target.value })}
+          placeholder="https://... or hiring@company.com"
           style={{ width: '100%', padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
         />
       </div>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useSessionStorage } from '../utils/useSessionStorage';
 import { Link } from 'react-router-dom';
 import api from '../api';
-import { Plus, Search, Bell, Download, Upload } from 'lucide-react';
+import { Plus, Search, Bell, Download, Upload, ChevronUp, ChevronDown } from 'lucide-react';
 import AlertDialog from './AlertDialog';
 import { debugLog } from '../utils/debugLogger';
 
@@ -23,10 +24,11 @@ export default function JobBoard() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [filteredJobs, setFilteredJobs] = useState<Job[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState<'date' | 'excitement' | 'fit'>('date');
+  const [sortBy, setSortBy] = useSessionStorage<'date' | 'excitement' | 'fit'>('jobboard_sortBy', 'date');
   const [showAddModal, setShowAddModal] = useState(false);
   const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [sortOrder, setSortOrder] = useSessionStorage<'asc' | 'desc'>('jobboard_sortOrder', 'desc');
 
 
   useEffect(() => {
@@ -35,7 +37,7 @@ export default function JobBoard() {
 
   useEffect(() => {
     filterAndSort();
-  }, [jobs, searchTerm, sortBy]);
+  }, [jobs, searchTerm, sortBy, sortOrder]);
 
   async function loadJobs() {
     try {
@@ -59,13 +61,15 @@ export default function JobBoard() {
 
     // Sort
     filtered.sort((a, b) => {
+      let comparison = 0;
       if (sortBy === 'date') {
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       } else if (sortBy === 'excitement') {
-        return b.excitement_score - a.excitement_score;
+        comparison = a.excitement_score - b.excitement_score;
       } else {
-        return b.fit_score - a.fit_score;
+        comparison = a.fit_score - b.fit_score;
       }
+      return sortOrder === 'asc' ? comparison : -comparison;
     });
 
     setFilteredJobs(filtered);
@@ -227,19 +231,42 @@ export default function JobBoard() {
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as any)}
           style={{
-            padding: '0.75rem 1rem',
+            padding: '0.75rem 2.5rem 0.75rem 1rem',
             backgroundColor: '#1a1d24',
             border: '1px solid #2d3139',
             borderRadius: '6px',
             color: '#e5e7eb',
             fontSize: '1rem',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            appearance: 'none',
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'right 0.75rem center',
+            backgroundSize: '1rem'
           }}
         >
           <option value="date">Sort by Date</option>
           <option value="excitement">Sort by Excitement</option>
           <option value="fit">Sort by Fit</option>
         </select>
+        <button
+          onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+          title={sortOrder === 'asc' ? 'Sort Ascending' : 'Sort Descending'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '46px',
+            height: '46px',
+            backgroundColor: '#1a1d24',
+            border: '1px solid #2d3139',
+            borderRadius: '6px',
+            color: '#fbbf24',
+            cursor: 'pointer'
+          }}
+        >
+          {sortOrder === 'asc' ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
+        </button>
       </div>
 
       {/* Job Grid */}
@@ -482,12 +509,13 @@ function AddJobModal({ onClose, onSave }: { onClose: () => void; onSave: (data: 
           </div>
           <div style={{ marginBottom: '1rem' }}>
             <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>
-              Job Link
+              Job Link / Email
             </label>
             <input
-              type="url"
+              type="text"
               value={formData.link}
               onChange={(e) => setFormData({ ...formData, link: e.target.value })}
+              placeholder="https://... or hiring@company.com"
               style={{
                 width: '100%',
                 padding: '0.75rem',

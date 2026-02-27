@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useSessionStorage } from '../utils/useSessionStorage';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
-import { ArrowLeft, Plus, Edit, Calendar, Trash2, Search, Bell, Upload } from 'lucide-react';
+import { ArrowLeft, Plus, Edit, Calendar, Trash2, Search, Bell, Upload, ChevronUp, ChevronDown } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import AlertDialog from './AlertDialog';
 import { debugLog } from '../utils/debugLogger';
@@ -13,10 +14,13 @@ interface Contact {
   email: string;
   phone: string;
   linkedin_url?: string;
+  social_platform?: string;
+  social_handle?: string;
   company_name: string;
   company_logo_url?: string;
   company_dark_logo_bg?: boolean;
   notes?: string;
+  email_draft?: string;
   next_check_in?: string;
   last_interaction?: string;
   nearest_reminder?: string;
@@ -128,13 +132,15 @@ export default function Contacts() {
   const [showAddInteraction, setShowAddInteraction] = useState(false);
   const [showAddReminder, setShowAddReminder] = useState(false);
   const [notesDraft, setNotesDraft] = useState('');
-  const [sortBy, setSortBy] = useState<'recent' | 'name' | 'company' | 'no_company'>('recent');
+  const [emailDraft, setEmailDraft] = useState('');
+  const [sortBy, setSortBy] = useSessionStorage<'recent' | 'name' | 'company' | 'no_company'>('contacts_sortBy', 'recent');
   const [showAddContact, setShowAddContact] = useState(false);
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
   const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [sortOrder, setSortOrder] = useSessionStorage<'asc' | 'desc'>('contacts_sortOrder', 'desc');
 
 
   useEffect(() => {
@@ -172,6 +178,7 @@ export default function Contacts() {
       ]);
       setSelectedContact(contactRes.data);
       setNotesDraft(contactRes.data.notes || '');
+      setEmailDraft(contactRes.data.email_draft || '');
       setInteractions(Array.isArray(interactionsRes.data) ? interactionsRes.data : []);
       setReminders(Array.isArray(remindersRes.data) ? remindersRes.data : []);
     } catch (error) {
@@ -267,6 +274,24 @@ export default function Contacts() {
       console.error('Error saving notes:', error);
       setAlertMsg({ title: 'Error', message: 'Error saving notes' });
       setNotesDraft(selectedContact.notes || '');
+    }
+  }
+
+  async function handleSaveEmailDraftInline() {
+    if (!selectedContact) return;
+    if (emailDraft === (selectedContact.email_draft || '')) return;
+
+    try {
+      const res = await api.put(`/contacts/${selectedContact.id}`, {
+        ...selectedContact,
+        email_draft: emailDraft
+      });
+      setSelectedContact(res.data);
+      setEmailDraft(res.data.email_draft || '');
+    } catch (error) {
+      console.error('Error saving email draft:', error);
+      setAlertMsg({ title: 'Error', message: 'Error saving email draft' });
+      setEmailDraft(selectedContact.email_draft || '');
     }
   }
 
@@ -589,6 +614,27 @@ export default function Contacts() {
                   />
                   <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.5rem' }}>Notes save automatically when you click away.</p>
                 </div>
+                {/* Email Draft Section */}
+                <div style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginTop: '1.5rem' }}>
+                  <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>Email Draft</h2>
+                  <textarea
+                    value={emailDraft}
+                    onChange={(e) => setEmailDraft(e.target.value)}
+                    onBlur={handleSaveEmailDraftInline}
+                    placeholder="Draft emails here to send later..."
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      backgroundColor: '#0f1115',
+                      border: '1px solid #2d3139',
+                      borderRadius: '6px',
+                      color: '#e5e7eb',
+                      minHeight: '200px',
+                      resize: 'vertical'
+                    }}
+                  />
+                  <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.5rem' }}>Drafts save automatically when you click away.</p>
+                </div>
               </div>
             </div>
           </div>
@@ -724,10 +770,28 @@ export default function Contacts() {
             }}
           >
             <option value="recent">Sort by Recent Activity</option>
-            <option value="name">Sort by Name (A–Z)</option>
-            <option value="company">Sort by Company (A–Z)</option>
+            <option value="name">Sort by Name</option>
+            <option value="company">Sort by Company</option>
             <option value="no_company">No Company First</option>
           </select>
+          <button
+            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+            title={sortOrder === 'asc' ? 'Sort Ascending' : 'Sort Descending'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '46px',
+              height: '46px',
+              backgroundColor: '#1a1d24',
+              border: '1px solid #2d3139',
+              borderRadius: '6px',
+              color: '#fbbf24',
+              cursor: 'pointer'
+            }}
+          >
+            {sortOrder === 'asc' ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
+          </button>
         </div>
       </div>
 
@@ -742,26 +806,28 @@ export default function Contacts() {
           : contacts;
 
         const sortedContacts = [...filtered].sort((a, b) => {
+          let comparison = 0;
           if (sortBy === 'name') {
-            return a.name.localeCompare(b.name);
-          }
-          if (sortBy === 'company') {
-            return (a.company_name || '').localeCompare(b.company_name || '');
-          }
-          if (sortBy === 'no_company') {
+            comparison = a.name.localeCompare(b.name);
+          } else if (sortBy === 'company') {
+            comparison = (a.company_name || '').localeCompare(b.company_name || '');
+          } else if (sortBy === 'no_company') {
             const aHas = !!a.company_name;
             const bHas = !!b.company_name;
             if (aHas === bHas) {
               const aTime = a.last_interaction ? new Date(a.last_interaction).getTime() : 0;
               const bTime = b.last_interaction ? new Date(b.last_interaction).getTime() : 0;
-              return bTime - aTime;
+              comparison = aTime - bTime;
+            } else {
+              comparison = aHas ? 1 : -1; // no company first
             }
-            return aHas ? 1 : -1; // no company first
+          } else {
+            // recent
+            const aTime = a.last_interaction ? new Date(a.last_interaction).getTime() : 0;
+            const bTime = b.last_interaction ? new Date(b.last_interaction).getTime() : 0;
+            comparison = aTime - bTime;
           }
-          // recent
-          const aTime = a.last_interaction ? new Date(a.last_interaction).getTime() : 0;
-          const bTime = b.last_interaction ? new Date(b.last_interaction).getTime() : 0;
-          return bTime - aTime;
+          return sortOrder === 'asc' ? comparison : -comparison;
         });
 
         return (
@@ -972,6 +1038,31 @@ function EditContactForm({ contact, onSave, onCancel }: { contact: Contact; onSa
         />
       </div>
       <div style={{ marginBottom: '1rem' }}>
+        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>Social Contact</label>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <select
+            value={formData.social_platform || ''}
+            onChange={(e) => setFormData({ ...formData, social_platform: e.target.value })}
+            style={{ padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', width: '30%' }}
+          >
+            <option value="">Platform</option>
+            <option value="LinkedIn">LinkedIn</option>
+            <option value="Twitter">Twitter</option>
+            <option value="Facebook">Facebook</option>
+            <option value="Discord">Discord</option>
+            <option value="GitHub">GitHub</option>
+            <option value="Other">Other</option>
+          </select>
+          <input
+            type="text"
+            placeholder="Username / Handle / Link"
+            value={formData.social_handle || ''}
+            onChange={(e) => setFormData({ ...formData, social_handle: e.target.value })}
+            style={{ width: '70%', padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
+          />
+        </div>
+      </div>
+      <div style={{ marginBottom: '1rem' }}>
         <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>Next Check-in Date</label>
         <input
           type="datetime-local"
@@ -996,7 +1087,7 @@ function EditContactForm({ contact, onSave, onCancel }: { contact: Contact; onSa
           Save
         </button>
       </div>
-    </form>
+    </form >
   );
 }
 
@@ -1133,6 +1224,8 @@ function AddContactModal({
     email: '',
     phone: '',
     linkedin_url: '',
+    social_platform: '',
+    social_handle: '',
     notes: '',
     company_id: ''
   });
@@ -1145,6 +1238,8 @@ function AddContactModal({
       email: formData.email || null,
       phone: formData.phone || null,
       linkedin_url: formData.linkedin_url || null,
+      social_platform: formData.social_platform || null,
+      social_handle: formData.social_handle || null,
       notes: formData.notes || null,
       company_id: formData.company_id ? Number(formData.company_id) : null
     });
@@ -1254,6 +1349,42 @@ function AddContactModal({
               color: '#e5e7eb'
             }}
           />
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+            <select
+              value={formData.social_platform}
+              onChange={(e) => setFormData({ ...formData, social_platform: e.target.value })}
+              style={{
+                width: '30%',
+                padding: '0.75rem',
+                backgroundColor: '#0f1115',
+                border: '1px solid #2d3139',
+                borderRadius: '6px',
+                color: '#e5e7eb'
+              }}
+            >
+              <option value="">Platform</option>
+              <option value="LinkedIn">LinkedIn</option>
+              <option value="Twitter">Twitter</option>
+              <option value="Facebook">Facebook</option>
+              <option value="Discord">Discord</option>
+              <option value="GitHub">GitHub</option>
+              <option value="Other">Other</option>
+            </select>
+            <input
+              type="text"
+              placeholder="Username / Handle / Link"
+              value={formData.social_handle}
+              onChange={(e) => setFormData({ ...formData, social_handle: e.target.value })}
+              style={{
+                width: '70%',
+                padding: '0.75rem',
+                backgroundColor: '#0f1115',
+                border: '1px solid #2d3139',
+                borderRadius: '6px',
+                color: '#e5e7eb'
+              }}
+            />
+          </div>
           <select
             value={formData.company_id}
             onChange={(e) => setFormData({ ...formData, company_id: e.target.value })}

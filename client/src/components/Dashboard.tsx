@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
-import { Briefcase, TrendingUp, Bell } from 'lucide-react';
+import { Briefcase, TrendingUp, Bell, AlertTriangle } from 'lucide-react';
 import { debugLog } from '../utils/debugLogger';
 
 interface Job {
@@ -25,6 +25,7 @@ interface Company {
   no_appropriate_jobs?: boolean;
   last_interaction: string;
   nearest_reminder?: string;
+  financial_stability_warning?: boolean;
 }
 
 interface Contact {
@@ -170,7 +171,10 @@ export default function Dashboard() {
                       </div>
                     )}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>{n.title || 'Reminder'}</div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                        <div style={{ fontWeight: 700 }}>{n.title ? n.title.split(' @ ')[0] : 'Reminder'}</div>
+                        {n.contact_name && <div style={{ color: '#9ca3af', fontSize: '0.85rem', fontWeight: 'normal' }}>{n.contact_name}</div>}
+                      </div>
                       <div style={{ color: '#9ca3af', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {n.message}
                       </div>
@@ -309,6 +313,11 @@ export default function Dashboard() {
                     )}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <span>{company.name}</span>
+                      {!!company.financial_stability_warning && (
+                        <span style={{ color: '#f87171' }} title="Questionable Funds">
+                          <AlertTriangle size={14} />
+                        </span>
+                      )}
                       {!!company.no_posted_jobs && (
                         <span style={{
                           display: 'inline-flex',

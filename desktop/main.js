@@ -13,9 +13,9 @@ let serverProcess;
 let tray;
 let isQuitting = false;
 let isManualUpdateCheck = false;
-let isDownloadInProgress = false;
 let themedDialogCounter = 0;
 let reminderPollInterval = null;
+let enableLocalUpdates = false;
 const gmailTokenPath = path.join(app.getPath('userData'), 'gmail-oauth.json');
 
 function base64UrlEncode(buffer) {
@@ -380,7 +380,7 @@ function setupSpellcheckAndContextMenu(win) {
 }
 
 
-function loadPrereleaseSetting() {
+function loadUpdateSettings() {
   return new Promise((resolve) => {
     http.get('http://localhost:3000/api/settings', (res) => {
       let data = '';
@@ -390,18 +390,21 @@ function loadPrereleaseSetting() {
       res.on('end', () => {
         try {
           const settings = JSON.parse(data);
-          const allowPrerelease = settings.allow_prerelease === 'true';
-          autoUpdater.allowPrerelease = allowPrerelease;
-          console.log('[Auto-updater] allowPrerelease set to:', allowPrerelease);
+          const allowPrereleaseValue = settings.allow_prerelease === 'true';
+          autoUpdater.allowPrerelease = allowPrereleaseValue;
+          enableLocalUpdates = settings.enable_local_updates === 'true';
+          console.log('[Auto-updater] allowPrerelease:', allowPrereleaseValue, '| enableLocalUpdates:', enableLocalUpdates);
         } catch (error) {
           console.error('[Auto-updater] Error parsing settings:', error);
           autoUpdater.allowPrerelease = false;
+          enableLocalUpdates = false;
         }
         resolve();
       });
     }).on('error', (error) => {
       console.error('[Auto-updater] Error fetching settings:', error);
       autoUpdater.allowPrerelease = false;
+      enableLocalUpdates = false;
       resolve();
     });
   });
@@ -1570,13 +1573,18 @@ function setupAutoUpdater() {
   // Wait for server to be ready (so prerelease setting can be loaded), then check
   setTimeout(async () => {
     try {
-      await loadPrereleaseSetting();
+      await loadUpdateSettings();
     } catch (e) {
-      console.error('[Auto-updater] Failed to load prerelease setting:', e);
+      console.error('[Auto-updater] Failed to load update settings:', e);
     }
     console.log('[Auto-updater] Running startup update check...');
     checkForUpdates(false);
   }, 8000); // 8 seconds: server needs ~5s to start, then we load settings
+}
+
+function getLocalUpdatePath() {
+  if (!app.isPackaged) return null;
+  return path.dirname(process.execPath);
 }
 
 function checkForUpdates(manual = false) {
@@ -1594,9 +1602,36 @@ function checkForUpdates(manual = false) {
   }
 
   isManualUpdateCheck = manual;
-  console.log(`[Auto-updater] checkForUpdates called (manual: ${manual}, allowPrerelease: ${autoUpdater.allowPrerelease})`);
+  console.log(`[Auto-updater] checkForUpdates called (manual: ${manual}, allowPrerelease: ${autoUpdater.allowPrerelease}, enableLocalUpdates: ${enableLocalUpdates})`);
 
-  // Just call checkForUpdates — all UI is handled by event handlers above
+  // If local updates enabled, check app directory first
+  const localPath = getLocalUpdatePath();
+  const latestYaml = localPath ? path.join(localPath, 'latest.yml') : null;
+
+  if (enableLocalUpdates && latestYaml && fs.existsSync(latestYaml)) {
+    console.log('[Auto-updater] Local latest.yml found, prioritizing local feed at:', localPath);
+    try {
+      autoUpdater.setFeedURL({
+        provider: 'generic',
+        url: `file://${localPath}`
+      });
+    } catch (err) {
+      console.error('[Auto-updater] Error setting local feed:', err);
+    }
+  } else {
+    // Standard GitHub feed fallback
+    try {
+      autoUpdater.setFeedURL({
+        provider: 'github',
+        owner: 'FaultedBeing',
+        repo: 'Job-Application-CRM'
+      });
+    } catch (err) {
+      console.error('[Auto-updater] Error setting GitHub feed:', err);
+    }
+  }
+
+  // Final check
   autoUpdater.checkForUpdates().catch((err) => {
     // The 'error' event handler will show the dialog if needed.
     // This .catch() just prevents unhandled promise rejection warnings.

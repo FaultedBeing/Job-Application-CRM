@@ -11,6 +11,8 @@ type NotificationItem = {
   due_at: string;
   read_at?: string | null;
   dismissed_at?: string | null;
+  logo_url?: string | null;
+  icon_bg?: string | null;
 };
 
 function formatDue(dueAt: string) {
@@ -42,15 +44,15 @@ export default function NotificationHub() {
     }
   }
 
-  async function refreshList() {
-    setLoading(true);
+  async function refreshList(isBackground = false) {
+    if (!isBackground && items.length === 0) setLoading(true);
     try {
       const res = await api.get('/notifications', { params: { limit: 50, offset: 0 } });
       setItems(res.data || []);
     } catch (_e) {
       // ignore
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   }
 
@@ -58,7 +60,7 @@ export default function NotificationHub() {
     function tick() {
       refreshUnread();
       if (open) {
-        refreshList();
+        refreshList(true);
       }
     }
     tick();
@@ -70,7 +72,7 @@ export default function NotificationHub() {
     function handleUpdated() {
       refreshUnread();
       if (open) {
-        refreshList();
+        refreshList(true);
       }
     }
     window.addEventListener('notifications-updated', handleUpdated);
@@ -258,7 +260,7 @@ export default function NotificationHub() {
                         <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: '1rem' }}>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ color: '#e5e7eb', fontWeight: 700, marginBottom: '0.15rem' }}>
-                              {n.title || 'Reminder'}
+                              {n.title ? n.title.split(' @ ')[0] : 'Reminder'}
                             </div>
                             <div style={{ color: '#9ca3af', fontSize: '0.8rem', marginBottom: '0.5rem' }}>
                               Due: {formatDue(n.due_at)}
@@ -267,61 +269,85 @@ export default function NotificationHub() {
                           </div>
                         </div>
 
-                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
-                          {isUnread && (
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'space-between', marginTop: '0.75rem', alignItems: 'flex-end' }}>
+                          <div>
+                            {n.logo_url && (
+                              <div style={{
+                                width: '32px',
+                                height: '32px',
+                                backgroundColor: n.icon_bg || '#0f1115',
+                                borderRadius: '6px',
+                                padding: '4px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: '1px solid #2d3139'
+                              }}>
+                                <img
+                                  src={n.logo_url}
+                                  alt=""
+                                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            {isUnread && (
+                              <button
+                                onClick={() => markRead(n.id)}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem',
+                                  padding: '0.4rem 0.7rem',
+                                  borderRadius: '8px',
+                                  border: '1px solid #2d3139',
+                                  backgroundColor: 'transparent',
+                                  color: '#9ca3af',
+                                  cursor: 'pointer'
+                                }}
+                                title="Mark as read"
+                              >
+                                <Check size={14} />
+                                Read
+                              </button>
+                            )}
                             <button
-                              onClick={() => markRead(n.id)}
+                              onClick={() => openNotification(n)}
                               style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 gap: '0.35rem',
                                 padding: '0.4rem 0.7rem',
                                 borderRadius: '8px',
-                                border: '1px solid #2d3139',
-                                backgroundColor: 'transparent',
-                                color: '#9ca3af',
-                                cursor: 'pointer'
+                                border: 'none',
+                                backgroundColor: '#3b82f6',
+                                color: '#fff',
+                                cursor: 'pointer',
+                                fontWeight: 600
                               }}
-                              title="Mark as read"
+                              title="Open"
                             >
-                              <Check size={14} />
-                              Read
+                              <ExternalLink size={14} />
+                              Open
                             </button>
-                          )}
-                          <button
-                            onClick={() => openNotification(n)}
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '0.35rem',
-                              padding: '0.4rem 0.7rem',
-                              borderRadius: '8px',
-                              border: 'none',
-                              backgroundColor: '#3b82f6',
-                              color: '#fff',
-                              cursor: 'pointer',
-                              fontWeight: 600
-                            }}
-                            title="Open"
-                          >
-                            <ExternalLink size={14} />
-                            Open
-                          </button>
-                          <button
-                            onClick={() => dismiss(n.id)}
-                            style={{
-                              padding: '0.4rem 0.7rem',
-                              borderRadius: '8px',
-                              border: '1px solid #4b5563',
-                              backgroundColor: 'transparent',
-                              color: '#f87171',
-                              cursor: 'pointer',
-                              fontWeight: 600
-                            }}
-                            title="Dismiss"
-                          >
-                            Dismiss
-                          </button>
+                            <button
+                              onClick={() => dismiss(n.id)}
+                              style={{
+                                padding: '0.4rem 0.7rem',
+                                borderRadius: '8px',
+                                border: '1px solid #4b5563',
+                                backgroundColor: 'transparent',
+                                color: '#f87171',
+                                cursor: 'pointer',
+                                fontWeight: 600
+                              }}
+                              title="Dismiss"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
