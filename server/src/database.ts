@@ -8,6 +8,7 @@ import os from 'os';
 export class Database {
   private db: sqlite3.Database;
   private encryptionKey: Buffer | null = null;
+  private userId: string | null = null;
 
   constructor(dbPath: string) {
     // Ensure directory exists
@@ -100,24 +101,131 @@ export class Database {
     'gmail_client_secret'
   ];
 
-  private run(sql: string, params: any[] = []): Promise<void> {
+  async run(sql: string, params: any[] = [], skipSync = false): Promise<any> {
+    const self = this;
     return new Promise((resolve, reject) => {
-      this.db.run(sql, params, (err) => {
+      this.db.run(sql, params, function (this: any, err: Error | null) {
         if (err) {
-          // Ignore "duplicate column" errors for migrations
           if (err.message.includes('duplicate column')) {
-            resolve();
+            resolve({ lastID: 0, changes: 0 });
           } else {
             reject(err);
           }
-        } else {
-          resolve();
+          return;
         }
+
+        const result = { lastID: this.lastID, changes: this.changes };
+
+        // Log mutation to sync_queue if it's not a sync-internal query
+        if (!skipSync && !sql.toLowerCase().includes('sync_queue') && !sql.toLowerCase().includes('pragma')) {
+          const upperSql = sql.trim().toUpperCase();
+          let action: string | null = null;
+          let tableName: string | null = null;
+
+          if (upperSql.startsWith('INSERT')) action = 'INSERT';
+          else if (upperSql.startsWith('UPDATE')) action = 'UPDATE';
+          else if (upperSql.startsWith('DELETE')) action = 'DELETE';
+
+          if (action) {
+            // Very basic table name extraction - in production this would be more robust
+            const match = sql.match(/(?:INSERT INTO|UPDATE|DELETE FROM)\s+([a-zA-Z0-9_]+)/i);
+            tableName = match ? match[1] : null;
+
+            if (tableName && tableName !== 'activity_log') {
+              // We try to log the mutation. We don't block the main operation if it fails.
+              try {
+                // If it's an UPDATE or DELETE, we might not have the ID in params easily
+                // For now, we'll rely on the sync service to scan updated_at for updates,
+                // and use sync_queue primarily for DELETES and helping with INSERT tracking.
+                // However, let's try to capture the ID if it's a simple "WHERE id = ?"
+                let recordId: number | null = null;
+                if (action === 'INSERT') {
+                  recordId = this.lastID;
+                } else {
+                  // Try to find an ID in params (usually the last param in our repo's patterns)
+                  // This is a heuristic that works with this codebase's specific updateCompany(id, ...) pattern
+                  if (params.length > 0 && typeof params[params.length - 1] === 'number') {
+                    recordId = params[params.length - 1];
+                  }
+                }
+
+                // If it's the settings table, we also capture the key
+                let recordKey: string | null = null;
+                if (tableName === 'settings' && params.length > 0) {
+                  recordKey = params[0] as string;
+                }
+
+                // Push to queue
+                // We use this.db.run directly to bypass the 'this.run' wrapper and avoid recursion
+                const queueSql = `INSERT INTO sync_queue (table_name, record_id, record_key, action, user_id) VALUES (?, ?, ?, ?, ?)`;
+                const queueParams = [tableName, recordId, recordKey, action, self.userId];
+
+                self.db.run(queueSql, queueParams, (qErr: Error | null) => {
+                  if (qErr) console.error('Failed to log to sync_queue:', qErr);
+                });
+              } catch (e) {
+                console.error('Error logging to sync_queue:', e);
+              }
+            }
+          }
+        }
+
+        resolve(result);
       });
     });
   }
 
-  private get(sql: string, params: any[] = []): Promise<any> {
+  setUserId(userId: string | null) {
+    this.userId = userId;
+  }
+
+  getUserId() {
+    return this.userId;
+  }
+
+  async migrateLocalData(userId: string) {
+    const tables = [
+      'companies', 'jobs', 'contacts', 'interactions', 'reminders',
+      'notifications', 'email_drafts', 'documents', 'interview_questions', 'settings'
+    ];
+
+    for (const table of tables) {
+      // 1. Log to sync_queue for all existing records that are being claimed
+      // We use 'INSERT' action because for the cloud, these are new records.
+      // We skip 'settings' for record_id and use record_key instead later.
+      if (table !== 'settings' && table !== 'notifications' && table !== 'activity_log') {
+        const records = await this.all(`SELECT id FROM ${table} WHERE user_id IS NULL`);
+        for (const rec of records) {
+          await this.run(
+            `INSERT INTO sync_queue (table_name, record_id, action, user_id) VALUES (?, ?, ?, ?)`,
+            [table, rec.id, 'INSERT', userId],
+            true // skipSync=true to avoid double queuing from the run() wrapper
+          );
+        }
+      }
+
+      // 2. Perform the update
+      await this.run(
+        `UPDATE ${table} SET user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id IS NULL`,
+        [userId],
+        true // skipSync=true
+      );
+    }
+    console.log(`AWSService: Migration to user ${userId} complete.`);
+    return { success: true };
+  }
+
+  async getLocalRecordCount() {
+    const tables = ['companies', 'jobs', 'contacts', 'interactions', 'reminders', 'notifications', 'email_drafts', 'documents', 'interview_questions'];
+    let total = 0;
+    for (const table of tables) {
+      const row = await this.get(`SELECT count(*) as count FROM ${table} WHERE user_id IS NULL OR user_id = ''`);
+      total += row.count || 0;
+    }
+    return total;
+  }
+
+  public get(sql: string, params: any[] = []): Promise<any> {
     return new Promise((resolve, reject) => {
       this.db.get(sql, params, (err, row) => {
         if (err) reject(err);
@@ -126,7 +234,7 @@ export class Database {
     });
   }
 
-  private all(sql: string, params: any[] = []): Promise<any[]> {
+  public all(sql: string, params: any[] = []): Promise<any[]> {
     return new Promise((resolve, reject) => {
       this.db.all(sql, params, (err, rows) => {
         if (err) reject(err);
@@ -153,7 +261,9 @@ export class Database {
         employee_count INTEGER,
         company_size TEXT,
         financial_stability_warning INTEGER DEFAULT 0,
-        excitement_rating INTEGER DEFAULT 0
+        excitement_rating INTEGER DEFAULT 0,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -181,6 +291,8 @@ export class Database {
         excitement_score INTEGER DEFAULT 3,
         fit_score INTEGER DEFAULT 3,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (company_id) REFERENCES companies(id)
       )
     `);
@@ -202,6 +314,8 @@ export class Database {
         linkedin_url TEXT,
         next_check_in DATETIME,
         is_prospective INTEGER DEFAULT 0,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (company_id) REFERENCES companies(id),
         FOREIGN KEY (job_id) REFERENCES jobs(id)
       )
@@ -224,6 +338,8 @@ export class Database {
         type TEXT,
         content TEXT,
         date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (job_id) REFERENCES jobs(id),
         FOREIGN KEY (contact_id) REFERENCES contacts(id),
         FOREIGN KEY (company_id) REFERENCES companies(id)
@@ -240,11 +356,11 @@ export class Database {
         due_at DATETIME NOT NULL,
         message TEXT NOT NULL,
         link_path TEXT,
-        notify_desktop INTEGER DEFAULT 1,
         notify_email INTEGER DEFAULT 0,
         sent_at DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        user_id TEXT
       )
     `);
 
@@ -273,6 +389,8 @@ export class Database {
         delivered_email_at DATETIME,
         read_at DATETIME,
         dismissed_at DATETIME,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -307,6 +425,8 @@ export class Database {
         filename TEXT NOT NULL,
         path TEXT NOT NULL,
         type TEXT,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (job_id) REFERENCES jobs(id)
       )
@@ -343,6 +463,7 @@ export class Database {
         type TEXT NOT NULL,
         question TEXT NOT NULL,
         answer TEXT,
+        user_id TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
@@ -351,7 +472,9 @@ export class Database {
     await this.run(`
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
-        value TEXT
+        value TEXT,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -362,9 +485,41 @@ export class Database {
         entity_type TEXT NOT NULL, -- 'job' | 'contact' | 'interaction' | 'company' | 'note'
         entity_id INTEGER,
         description TEXT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        user_id TEXT
       )
     `);
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS sync_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        table_name TEXT NOT NULL,
+        record_id INTEGER,
+        record_key TEXT, -- for settings
+        action TEXT NOT NULL, -- 'INSERT', 'UPDATE', 'DELETE'
+        data TEXT, -- JSON snapshot if needed, or null
+        user_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await this.run(`ALTER TABLE companies ADD COLUMN user_id TEXT`);
+    await this.run(`ALTER TABLE companies ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    await this.run(`ALTER TABLE jobs ADD COLUMN user_id TEXT`);
+    await this.run(`ALTER TABLE jobs ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    await this.run(`ALTER TABLE contacts ADD COLUMN user_id TEXT`);
+    await this.run(`ALTER TABLE contacts ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    await this.run(`ALTER TABLE interactions ADD COLUMN user_id TEXT`);
+    await this.run(`ALTER TABLE interactions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    await this.run(`ALTER TABLE reminders ADD COLUMN user_id TEXT`);
+    await this.run(`ALTER TABLE reminders ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    await this.run(`ALTER TABLE notifications ADD COLUMN user_id TEXT`);
+    await this.run(`ALTER TABLE notifications ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    await this.run(`ALTER TABLE documents ADD COLUMN user_id TEXT`);
+    await this.run(`ALTER TABLE documents ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    await this.run(`ALTER TABLE interview_questions ADD COLUMN user_id TEXT`);
+    await this.run(`ALTER TABLE interview_questions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    await this.run(`ALTER TABLE settings ADD COLUMN user_id TEXT`);
+    await this.run(`ALTER TABLE settings ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
 
     // Initialize default settings
     const username = await this.get('SELECT value FROM settings WHERE key = ?', ['username']);
@@ -431,9 +586,10 @@ export class Database {
         ) as nearest_reminder
       FROM companies c
       LEFT JOIN jobs j ON c.id = j.company_id
+      WHERE (c.user_id = ? OR c.user_id IS NULL)
       GROUP BY c.id
       ORDER BY c.last_interaction DESC
-    `);
+    `, [this.userId]);
     return companies.map((c: any) => ({
       ...c,
       job_count: c.job_count || 0,
@@ -452,8 +608,8 @@ export class Database {
             OR (r.entity_type = 'job' AND r.entity_id IN (SELECT id FROM jobs WHERE company_id = c.id))) 
           AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
         ) as nearest_reminder
-      FROM companies c WHERE id = ?
-      `, [id]);
+      FROM companies c WHERE id = ? AND (c.user_id = ? OR c.user_id IS NULL)
+      `, [id, this.userId]);
     if (!c) return c;
     return {
       ...c,
@@ -471,9 +627,9 @@ export class Database {
           WHERE r.entity_type = 'job' AND r.entity_id = j.id AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
         ) as nearest_reminder
       FROM jobs j
-      WHERE j.company_id = ? 
+      WHERE j.company_id = ? AND (j.user_id = ? OR j.user_id IS NULL)
       ORDER BY j.created_at DESC
-    `, [companyId]);
+    `, [companyId, this.userId]);
   }
 
   async getCompanyContacts(companyId: number) {
@@ -486,17 +642,17 @@ export class Database {
           AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
         ) as nearest_reminder
       FROM contacts c
-      WHERE c.company_id = ? 
+      WHERE c.company_id = ? AND (c.user_id = ? OR c.user_id IS NULL)
       ORDER BY c.last_interaction DESC
-    `, [companyId]);
+    `, [companyId, this.userId]);
   }
 
   async createCompany(data: any) {
-    await this.run(
-      'INSERT INTO companies (name, website, industry, notes, location, dark_logo_bg, no_posted_jobs, no_appropriate_jobs, financial_stability_warning, logo_url, employee_count, company_size, excitement_rating) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.financial_stability_warning ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null, data.excitement_rating || 0]
+    const { lastID } = await this.run(
+      'INSERT INTO companies (name, website, industry, notes, location, dark_logo_bg, no_posted_jobs, no_appropriate_jobs, financial_stability_warning, logo_url, employee_count, company_size, excitement_rating, user_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.financial_stability_warning ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null, data.excitement_rating || 0, this.userId]
     );
-    const res = await this.get('SELECT * FROM companies WHERE name = ?', [data.name]);
+    const res = await this.getCompany(lastID);
     if (res) {
       await this.logActivity('create', 'company', res.id, `Created company "${res.name}"`);
     }
@@ -505,7 +661,7 @@ export class Database {
 
   async updateCompany(id: number, data: any) {
     await this.run(
-      'UPDATE companies SET name = ?, website = ?, industry = ?, notes = ?, location = ?, dark_logo_bg = ?, no_posted_jobs = ?, no_appropriate_jobs = ?, financial_stability_warning = ?, logo_url = ?, employee_count = ?, company_size = ?, excitement_rating = ? WHERE id = ?',
+      'UPDATE companies SET name = ?, website = ?, industry = ?, notes = ?, location = ?, dark_logo_bg = ?, no_posted_jobs = ?, no_appropriate_jobs = ?, financial_stability_warning = ?, logo_url = ?, employee_count = ?, company_size = ?, excitement_rating = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.financial_stability_warning ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null, data.excitement_rating || 0, id]
     );
     const updated = await this.getCompany(id);
@@ -555,8 +711,9 @@ export class Database {
         ) as nearest_reminder
       FROM jobs j
       LEFT JOIN companies c ON j.company_id = c.id
+      WHERE (j.user_id = ? OR j.user_id IS NULL)
       ORDER BY j.created_at DESC
-    `);
+    `, [this.userId]);
     return jobs.map((job: any) => ({
       ...job,
       company_dark_logo_bg: Boolean(job.company_dark_logo_bg)
@@ -571,8 +728,8 @@ export class Database {
           SELECT MIN(r.due_at) FROM reminders r 
           WHERE r.entity_type = 'job' AND r.entity_id = j.id AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
         ) as nearest_reminder
-      FROM jobs j WHERE id = ?
-      `, [id]);
+      FROM jobs j WHERE id = ? AND (j.user_id = ? OR j.user_id IS NULL)
+      `, [id, this.userId]);
     if (job && job.company_id) {
       const company = await this.getCompany(job.company_id);
       return { ...job, company };
@@ -589,16 +746,16 @@ export class Database {
         const company = await this.findOrCreateCompany(data.company_name);
         companyId = company.id;
         // Update company last_interaction
-        await this.run('UPDATE companies SET last_interaction = CURRENT_TIMESTAMP WHERE id = ?', [companyId]);
+        await this.run('UPDATE companies SET last_interaction = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [companyId]);
       } catch (err) {
         console.error('Error creating company:', err);
         // Continue with company_name as fallback
       }
     }
 
-    await this.run(
-      `INSERT INTO jobs (company_id, company_name, title, location, status, link, description, notes, excitement_score, fit_score)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    const { lastID } = await this.run(
+      `INSERT INTO jobs (company_id, company_name, title, location, status, link, description, notes, excitement_score, fit_score, user_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
       [
         companyId,
         data.company_name || null,
@@ -609,15 +766,15 @@ export class Database {
         data.description || null,
         data.notes || null,
         data.excitement_score ?? 3,
-        data.fit_score ?? 3
+        data.fit_score ?? 3,
+        this.userId
       ]
     );
 
-    const job = await this.get('SELECT * FROM jobs WHERE title = ? AND company_id = ? ORDER BY id DESC LIMIT 1',
-      [data.title, companyId]);
+    const job = await this.getJob(lastID);
 
     if (companyId) {
-      await this.run('UPDATE companies SET last_interaction = CURRENT_TIMESTAMP WHERE id = ?', [companyId]);
+      await this.run('UPDATE companies SET last_interaction = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [companyId]);
     }
 
     if (job) {
@@ -652,7 +809,8 @@ export class Database {
         description = ?, 
         notes = ?, 
         excitement_score = ?, 
-        fit_score = ?
+        fit_score = ?,
+        updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         companyId || null,
@@ -707,8 +865,9 @@ export class Database {
         ) as nearest_reminder
       FROM contacts c
       LEFT JOIN companies co ON c.company_id = co.id
+      WHERE (c.user_id = ? OR c.user_id IS NULL)
       ORDER BY c.last_interaction DESC
-    `);
+    `, [this.userId]);
   }
 
   async getJobContacts(jobId: number) {
@@ -727,17 +886,17 @@ export class Database {
           WHERE ((r.entity_type = 'contact' AND r.entity_id = c.id) OR (r.contact_id = c.id))
           AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
         ) as nearest_reminder
-      FROM contacts c
-      WHERE c.job_id = ? 
-      OR (c.company_id = ? AND c.job_id IS NULL)
+      WHERE (c.job_id = ? 
+      OR (c.company_id = ? AND c.job_id IS NULL))
+      AND (c.user_id = ? OR c.user_id IS NULL)
       ORDER BY c.last_interaction DESC
-    `, [jobId, companyId || -1]);
+    `, [jobId, companyId || -1, this.userId]);
   }
 
   async createContact(data: any) {
-    await this.run(
-      `INSERT INTO contacts (name, company_id, job_id, role, email, phone, notes, linkedin_url, next_check_in, social_platform, social_handle, email_draft, is_prospective)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    const { lastID } = await this.run(
+      `INSERT INTO contacts (name, company_id, job_id, role, email, phone, notes, linkedin_url, next_check_in, social_platform, social_handle, email_draft, is_prospective, user_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
       [
         data.name,
         data.company_id || null,
@@ -751,11 +910,12 @@ export class Database {
         data.social_platform || null,
         data.social_handle || null,
         data.email_draft || null,
-        data.is_prospective ? 1 : 0
+        data.is_prospective ? 1 : 0,
+        this.userId
       ]
     );
 
-    const contact = await this.get('SELECT * FROM contacts WHERE name = ? ORDER BY id DESC LIMIT 1', [data.name]);
+    const contact = await this.getContact(lastID);
 
     // If contact is added to a job, also add it to the company (but not to other jobs)
     if (data.job_id && !data.company_id) {
@@ -781,7 +941,7 @@ export class Database {
 
   async updateContact(id: number, data: any) {
     await this.run(
-      `UPDATE contacts SET name = ?, company_id = ?, job_id = ?, role = ?, email = ?, phone = ?, notes = ?, linkedin_url = ?, next_check_in = ?, social_platform = ?, social_handle = ?, email_draft = ?, is_prospective = ?
+      `UPDATE contacts SET name = ?, company_id = ?, job_id = ?, role = ?, email = ?, phone = ?, notes = ?, linkedin_url = ?, next_check_in = ?, social_platform = ?, social_handle = ?, email_draft = ?, is_prospective = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         data.name,
@@ -818,9 +978,9 @@ export class Database {
         co.dark_logo_bg as company_dark_logo_bg
       FROM contacts c
       LEFT JOIN companies co ON c.company_id = co.id
-      WHERE c.id = ?
+      WHERE c.id = ? AND (c.user_id = ? OR c.user_id IS NULL)
       `,
-      [id]
+      [id, this.userId]
     );
   }
 
@@ -869,8 +1029,8 @@ export class Database {
         ON r.entity_type = 'interaction'
        AND r.entity_id = i.id
        AND r.source = 'follow_up'
-      WHERE i.id = ?
-    `, [id]);
+      WHERE i.id = ? AND (i.user_id = ? OR i.user_id IS NULL)
+    `, [id, this.userId]);
   }
 
   async getInteractions() {
@@ -889,8 +1049,9 @@ export class Database {
         ON r.entity_type = 'interaction'
        AND r.entity_id = i.id
        AND r.source = 'follow_up'
+      WHERE (i.user_id = ? OR i.user_id IS NULL)
       ORDER BY i.date DESC
-    `);
+    `, [this.userId]);
   }
 
   async deleteInteraction(id: number) {
@@ -904,20 +1065,21 @@ export class Database {
   }
 
   async createInteraction(data: any) {
-    await this.run(
-      `INSERT INTO interactions (job_id, contact_id, company_id, type, content, date)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+    const { lastID } = await this.run(
+      `INSERT INTO interactions (job_id, contact_id, company_id, type, content, date, user_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
       [
         data.job_id || null,
         data.contact_id || null,
         data.company_id || null,
         data.type,
         data.content || null,
-        data.date || new Date().toISOString()
+        data.date || new Date().toISOString(),
+        this.userId
       ]
     );
 
-    const interaction = await this.get('SELECT * FROM interactions ORDER BY id DESC LIMIT 1');
+    const interaction = await this.getInteraction(lastID);
 
     // Optional follow-up reminder attached to this interaction
     if (data.follow_up_at) {
@@ -946,10 +1108,10 @@ export class Database {
 
     // Update last_interaction timestamps
     if (data.company_id) {
-      await this.run('UPDATE companies SET last_interaction = CURRENT_TIMESTAMP WHERE id = ?', [data.company_id]);
+      await this.run('UPDATE companies SET last_interaction = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [data.company_id]);
     }
     if (data.contact_id) {
-      await this.run('UPDATE contacts SET last_interaction = CURRENT_TIMESTAMP WHERE id = ?', [data.contact_id]);
+      await this.run('UPDATE contacts SET last_interaction = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [data.contact_id]);
     }
 
     if (interaction) {
@@ -973,22 +1135,23 @@ export class Database {
   }) {
     if (rem.source === 'manual') {
       await this.run(
-        `INSERT INTO reminders (entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, contact_id, sent_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP)`,
+        `INSERT INTO reminders (entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, contact_id, sent_at, user_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, CURRENT_TIMESTAMP)`,
         [
           rem.entity_type, rem.entity_id, rem.source,
           rem.due_at, rem.message, rem.link_path || null,
           rem.notify_desktop === undefined ? 1 : rem.notify_desktop ? 1 : 0,
           rem.notify_email === undefined ? 0 : rem.notify_email ? 1 : 0,
-          rem.contact_id || null
+          rem.contact_id || null,
+          this.userId
         ]
       );
     } else {
       await this.run(
-        `INSERT OR REPLACE INTO reminders (id, entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, contact_id, sent_at, updated_at)
+        `INSERT OR REPLACE INTO reminders (id, entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, contact_id, sent_at, user_id, updated_at)
          VALUES (
            (SELECT id FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ?),
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, CURRENT_TIMESTAMP
          )`,
         [
           rem.entity_type, rem.entity_id, rem.source,
@@ -1000,7 +1163,8 @@ export class Database {
           rem.link_path || null,
           rem.notify_desktop === undefined ? 1 : rem.notify_desktop ? 1 : 0,
           rem.notify_email === undefined ? 0 : rem.notify_email ? 1 : 0,
-          rem.contact_id || null
+          rem.contact_id || null,
+          this.userId
         ]
       );
     }
@@ -1123,9 +1287,9 @@ export class Database {
   async getDueReminders(nowIso: string) {
     return await this.all(
       `SELECT * FROM reminders
-       WHERE sent_at IS NULL AND due_at <= ?
+       WHERE sent_at IS NULL AND due_at <= ? AND (user_id = ? OR user_id IS NULL)
        ORDER BY due_at ASC`,
-      [nowIso]
+      [nowIso, this.userId]
     );
   }
 
@@ -1144,16 +1308,15 @@ export class Database {
 
   // Email Drafts
   async getContactEmailDrafts(contactId: number) {
-    return this.all('SELECT * FROM email_drafts WHERE contact_id = ? ORDER BY created_at DESC', [contactId]);
+    return this.all('SELECT * FROM email_drafts WHERE contact_id = ? AND (user_id = ? OR user_id IS NULL) ORDER BY created_at DESC', [contactId, this.userId]);
   }
 
   async createEmailDraft(contactId: number, content: string) {
-    const res = await this.run(
-      'INSERT INTO email_drafts (contact_id, content) VALUES (?, ?)',
-      [contactId, content]
+    const { lastID } = await this.run(
+      'INSERT INTO email_drafts (contact_id, content, user_id, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)',
+      [contactId, content, this.userId]
     );
-    // Since run doesn't return the ID in this promisified wrapper usually, but we might need it.
-    // Actually, our run implementation in database.ts might be different. Let's check it.
+    return await this.get('SELECT * FROM email_drafts WHERE id = ?', [lastID]);
   }
 
   async updateEmailDraft(id: number, content: string) {
@@ -1288,8 +1451,17 @@ export class Database {
   }
 
   async getPendingDelivery(channel: 'desktop' | 'email', nowIso: string, limit = 50) {
-    const col = channel === 'desktop' ? 'delivered_desktop_at' : 'delivered_email_at';
-    const flag = channel === 'desktop' ? 'notify_desktop' : 'notify_email';
+    const colMap: Record<string, string> = {
+      desktop: 'delivered_desktop_at',
+      email: 'delivered_email_at'
+    };
+    const flagMap: Record<string, string> = {
+      desktop: 'notify_desktop',
+      email: 'notify_email'
+    };
+    const col = colMap[channel];
+    const flag = flagMap[channel];
+
     return await this.all(
       `SELECT n.*, r.contact_id
        FROM notifications n
@@ -1298,24 +1470,26 @@ export class Database {
          AND n.due_at <= ?
          AND n.${flag} = 1
          AND n.${col} IS NULL
+         AND (n.user_id = ? OR n.user_id IS NULL)
        ORDER BY n.due_at ASC
        LIMIT ?`,
-      [nowIso, limit]
+      [nowIso, this.userId, limit]
     );
   }
 
   async markDelivered(id: number, channel: 'desktop' | 'email') {
-    if (channel === 'desktop') {
-      await this.run('UPDATE notifications SET delivered_desktop_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
-    } else {
-      await this.run('UPDATE notifications SET delivered_email_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
-    }
+    const colMap: Record<string, string> = {
+      desktop: 'delivered_desktop_at',
+      email: 'delivered_email_at'
+    };
+    const col = colMap[channel];
+    await this.run(`UPDATE notifications SET ${col} = CURRENT_TIMESTAMP WHERE id = ?`, [id]);
     return await this.get('SELECT * FROM notifications WHERE id = ?', [id]);
   }
 
   // Documents
   async getJobDocuments(jobId: number) {
-    return await this.all('SELECT * FROM documents WHERE job_id = ? ORDER BY created_at DESC', [jobId]);
+    return await this.all('SELECT * FROM documents WHERE job_id = ? AND (user_id = ? OR user_id IS NULL) ORDER BY created_at DESC', [jobId, this.userId]);
   }
 
   async getAllDocuments() {
@@ -1328,24 +1502,25 @@ export class Database {
       FROM documents d
       LEFT JOIN jobs j ON d.job_id = j.id
       LEFT JOIN companies c ON j.company_id = c.id
+      WHERE (d.user_id = ? OR d.user_id IS NULL)
       ORDER BY d.created_at DESC
-    `);
+    `, [this.userId]);
   }
 
   async createDocument(data: any) {
-    await this.run(
-      `INSERT INTO documents (job_id, filename, path, type)
-       VALUES (?, ?, ?, ?)`,
-      [data.job_id || null, data.filename, data.path, data.type || 'Other']
+    const { lastID } = await this.run(
+      `INSERT INTO documents (job_id, filename, path, type, user_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [data.job_id || null, data.filename, data.path, data.type || 'Other', this.userId]
     );
-    const doc = await this.get('SELECT * FROM documents ORDER BY id DESC LIMIT 1');
+    const doc = await this.get('SELECT * FROM documents WHERE id = ?', [lastID]);
     await this.logActivity('create', 'document', doc.id, `Added a ${data.type || 'Other'} document: "${data.filename}"`);
     return doc;
   }
 
   async updateDocument(id: number, data: any) {
     await this.run(
-      'UPDATE documents SET filename = ?, type = ? WHERE id = ?',
+      'UPDATE documents SET filename = ?, type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [data.filename, data.type || 'Other', id]
     );
     const doc = await this.get('SELECT * FROM documents WHERE id = ?', [id]);
@@ -1373,8 +1548,8 @@ export class Database {
   async logActivity(type: 'create' | 'update' | 'delete', entityType: string, entityId: number | null, description: string) {
     try {
       await this.run(
-        'INSERT INTO activity_log (type, entity_type, entity_id, description) VALUES (?, ?, ?, ?)',
-        [type, entityType, entityId, description]
+        'INSERT INTO activity_log (type, entity_type, entity_id, description, user_id) VALUES (?, ?, ?, ?, ?)',
+        [type, entityType, entityId, description, this.userId]
       );
     } catch (err) {
       console.error('Error logging activity:', err);
@@ -1383,14 +1558,14 @@ export class Database {
 
   async getRecentActivity(hours: number = 24) {
     return await this.all(
-      'SELECT * FROM activity_log WHERE timestamp >= datetime("now", ? || " hours") ORDER BY timestamp DESC',
-      [`-${hours}`]
+      'SELECT * FROM activity_log WHERE timestamp >= datetime("now", ? || " hours") AND (user_id = ? OR user_id IS NULL) ORDER BY timestamp DESC',
+      [`-${hours}`, this.userId]
     );
   }
 
   // Settings
   async getSettings() {
-    const rows = await this.all('SELECT * FROM settings');
+    const rows = await this.all('SELECT * FROM settings WHERE (user_id = ? OR user_id IS NULL)', [this.userId]);
     const settings: any = {};
     rows.forEach((row: any) => {
       // Decrypt sensitive fields
@@ -1406,7 +1581,7 @@ export class Database {
   async updateSetting(key: string, value: string) {
     // Encrypt sensitive fields before storing
     const valueToStore = this.ENCRYPTED_KEYS.includes(key) ? this.encrypt(value) : value;
-    await this.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, valueToStore]);
+    await this.run('INSERT OR REPLACE INTO settings (key, value, user_id, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)', [key, valueToStore, this.userId]);
   }
 
   // Export
@@ -1448,18 +1623,18 @@ export class Database {
 
   // Interview Questions
   async getInterviewQuestions() {
-    return await this.all('SELECT * FROM interview_questions ORDER BY created_at ASC');
+    return await this.all('SELECT * FROM interview_questions WHERE (user_id = ? OR user_id IS NULL) ORDER BY created_at ASC', [this.userId]);
   }
 
   async createInterviewQuestion(data: any) {
     if (!data.type || !data.question) {
       throw new Error('Type and question are required');
     }
-    await this.run(
-      'INSERT INTO interview_questions (type, question, answer) VALUES (?, ?, ?)',
-      [data.type, data.question, data.answer || null]
+    const { lastID } = await this.run(
+      'INSERT INTO interview_questions (type, question, answer, user_id, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+      [data.type, data.question, data.answer || null, this.userId]
     );
-    const question = await this.get('SELECT * FROM interview_questions ORDER BY id DESC LIMIT 1');
+    const question = await this.get('SELECT * FROM interview_questions WHERE id = ?', [lastID]);
     await this.logActivity('create', 'interview_question', question.id, `Added interview question: "${data.question}"`);
     return question;
   }

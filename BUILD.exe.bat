@@ -2,7 +2,7 @@
 REM Change to script directory to ensure we're in the right place
 cd /d "%~dp0"
 echo ========================================
-echo Job Application Tracker - Build Script
+echo Cloud Job Application Tracker - Build Script
 echo ========================================
 echo.
 
@@ -74,17 +74,17 @@ echo.
 echo [4/4] Creating executable...
 echo.
 echo NOTE: Make sure the .exe is not currently running!
-echo Close any open instances of "Job Application Tracker" before building.
+echo Close any open instances of "Cloud Job Application Tracker" before building.
 echo.
 timeout /t 3 /nobreak >nul
 
 REM Clean up old installer versions from root folder
 echo Cleaning up old installer versions...
-for %%f in ("Job Application Tracker Setup*.exe") do (
+for %%f in ("Cloud-Job-Application-Tracker-Setup*.exe") do (
     echo Removing old installer: %%f
     del /q "%%f" 2>nul
 )
-for %%f in ("Job Application Tracker Setup*.exe.blockmap") do (
+for %%f in ("Cloud-Job-Application-Tracker-Setup*.exe.blockmap") do (
     del /q "%%f" 2>nul
 )
 
@@ -119,7 +119,7 @@ echo ========================================
 echo.
 echo.
 echo Your installer is located in the root folder:
-echo   Job Application Tracker Setup [version].exe
+echo   Cloud-Job-Application-Tracker-Setup [version].exe
 echo.
 echo.
 echo Run the installer to install the application!

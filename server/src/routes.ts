@@ -6,10 +6,61 @@ import path from 'path';
 import { fetchCompanyLogo, fetchCompanyInfo } from './companyEnrichment';
 import nodemailer from 'nodemailer';
 import * as XLSX from 'xlsx';
-import { DiscordService } from './discordService';
-import { ActivityService } from './activityService';
+import { SyncService } from './syncService';
+import axios from 'axios';
 
-export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsPath: string) {
+export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsPath: string, syncService: SyncService) {
+  // Middleware to extract user identity from headers
+  app.use((req, res, next) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (userId) {
+      db.setUserId(userId);
+    } else {
+      // Default to null if no header, but could also default to 'admin'
+      // for compatibility with non-cloud setups if needed.
+      db.setUserId(null);
+    }
+    next();
+  });
+
+  // Sync
+  app.get('/api/sync/status', async (req: Request, res: Response) => {
+    try {
+      const settings = await db.getSettings();
+      res.json({
+        isSyncing: syncService.getStatus().isSyncing,
+        lastSync: settings.last_cloud_sync || null,
+        hasConfig: !!(settings.supabase_url && settings.supabase_key)
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/sync/migrate', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required for migration.' });
+      }
+      const result = await db.migrateLocalData(userId);
+      // Trigger a sync push immediately after migration
+      syncService.triggerImmediateSync();
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/sync/trigger', async (req: Request, res: Response) => {
+    try {
+      await syncService.sync();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Companies
   app.get('/api/companies', async (req: Request, res: Response) => {
     try {
@@ -712,6 +763,57 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
     }
   });
 
+  app.get('/api/download/lambda', async (req: Request, res: Response) => {
+    try {
+      const fileName = 'lambda-deployment.zip';
+      const paths = [
+        path.join(__dirname, '..', '..', 'client', 'public', fileName),
+        path.join(__dirname, '..', '..', 'client', 'dist', fileName),
+        path.join(process.cwd(), 'client', 'public', fileName),
+        path.join(process.cwd(), 'client', 'dist', fileName),
+        path.join(process.cwd(), 'resources', 'client-dist', fileName)
+      ];
+
+      let filePath = '';
+      console.log('--- Lambda Download Request ---');
+      console.log('CWD:', process.cwd());
+      console.log('__dirname:', __dirname);
+
+      for (const p of paths) {
+        const exists = await fs.pathExists(p);
+        console.log(`Checking path: ${p} - ${exists ? 'EXISTS' : 'NOT FOUND'}`);
+        if (exists) {
+          filePath = p;
+          break;
+        }
+      }
+
+      if (!filePath) {
+        console.error('Lambda ZIP not found in any of:', paths);
+        return res.status(404).json({
+          error: 'Lambda deployment package not found.',
+          diagnostics: {
+            cwd: process.cwd(),
+            dirname: __dirname,
+            checkedPaths: paths
+          }
+        });
+      }
+
+      res.download(filePath, fileName, (err) => {
+        if (err) {
+          console.error('Download error:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Download failed during streaming', details: err.message });
+          }
+        }
+      });
+    } catch (error: any) {
+      console.error('Route error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post('/api/settings', async (req: Request, res: Response) => {
     try {
       for (const [key, value] of Object.entries(req.body)) {
@@ -861,45 +963,7 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
     }
   });
 
-  app.post('/api/smtp/send', async (req: Request, res: Response) => {
-    try {
-      const { subject, html, text, to: toOverride } = req.body;
-      const settings = await db.getSettings();
-      const host = settings.smtp_host;
-      const port = parseInt(settings.smtp_port || '587', 10);
-      const user = settings.smtp_user;
-      const pass = settings.smtp_pass;
-      const from = settings.smtp_from;
-      const secure = (settings.smtp_secure || 'true') === 'true';
-      const to = toOverride || settings.smtp_recipient || from;
-
-      if (!host || !user || !pass || !from) {
-        res.status(400).json({ error: 'SMTP settings incomplete' });
-        return;
-      }
-
-      const transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,
-        auth: { user, pass },
-        tls: secure ? { rejectUnauthorized: false } : undefined
-      } as any);
-
-      await transporter.sendMail({
-        from,
-        to,
-        subject: subject || 'Job Application Tracker reminder',
-        text: text || '',
-        html: html || undefined
-      });
-
-      res.json({ ok: true });
-    } catch (error: any) {
-      console.error('SMTP send error:', error);
-      res.status(500).json({ error: error.message || 'SMTP send failed' });
-    }
-  });
+  // Removed local email sending logic. All emails are now handled by the Cloud Lambda.
 
   // Extract just city + state from LinkedIn-style addresses
   // e.g. "90026, California, Los Angeles, United States" → "Los Angeles, California"
@@ -1167,13 +1231,10 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
     }
   });
 
-  // Discord & Activity
-  const activityService = new ActivityService(db);
-
-  app.get('/api/activity/summary', async (req: Request, res: Response) => {
+  app.get('/api/sync/local-count', async (req: Request, res: Response) => {
     try {
-      const summary = await activityService.generateDailySummary();
-      res.json({ summary });
+      const count = await db.getLocalRecordCount();
+      res.json({ count });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1182,64 +1243,36 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
   app.post('/api/discord/test', async (req: Request, res: Response) => {
     try {
       const { token, channelId } = req.body;
-      const result = await DiscordService.sendMessage(token, channelId, "The bot is configured correctly");
-      res.json(result);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.post('/api/discord/send-summary', async (req: Request, res: Response) => {
-    try {
-      const settings = await db.getSettings();
-      const token = settings.discord_bot_token;
-      const channelId = settings.discord_recipient_id;
-
       if (!token || !channelId) {
-        return res.status(400).json({ error: 'Discord token and channel ID are not configured.' });
+        return res.status(400).json({ error: 'Token and Channel ID are required' });
       }
 
-      const now = new Date();
-      let lastTime = new Date(0); // Epoch if never sent
-      if (settings.discord_last_summary_at) {
-        lastTime = new Date(settings.discord_last_summary_at);
-      }
-
-      const msSinceLast = now.getTime() - lastTime.getTime();
-      const hoursSinceLast = Math.floor(msSinceLast / (1000 * 60 * 60));
-
-      let shouldSend = false;
-      let summaryToSend = "";
-
-      if (settings.discord_last_summary_at && hoursSinceLast >= 24) {
-        // Missed a day or more
-        summaryToSend = `**System Alert**\nThe software was not opened for ${hoursSinceLast} hours. No daily summaries were sent during this period.`;
-        shouldSend = true;
-      } else {
-        // Normal daily check
-        const currentHour = now.getHours();
-        const inWindow = currentHour >= 17 && currentHour <= 23;
-        const sameDay = lastTime.getDate() === now.getDate() && lastTime.getMonth() === now.getMonth() && lastTime.getFullYear() === now.getFullYear();
-
-        if (inWindow && !sameDay) {
-          summaryToSend = await activityService.generateDailySummary();
-          shouldSend = true;
+      // Handle both comma-separated and JSON array formats
+      let ids: string[] = [];
+      try {
+        const parsed = JSON.parse(channelId);
+        if (Array.isArray(parsed)) {
+          ids = parsed.map((r: any) => typeof r === 'string' ? r : r.id);
+        } else {
+          ids = [channelId];
         }
+      } catch (e) {
+        ids = channelId.split(',').map((id: string) => id.trim());
       }
 
-      if (!shouldSend) {
-        // Not time to send yet, or already sent today.
-        return res.json({ success: true, sent: false });
+      const summary = "**Success!** Your Discord bot is connected and ready for the Job CRM Cloud summary.";
+
+      for (const id of ids) {
+        if (!id) continue;
+        await axios.post(`https://discord.com/api/v10/channels/${id}/messages`, { content: summary }, {
+          headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' }
+        });
       }
 
-      await DiscordService.sendMessage(token, channelId, summaryToSend);
-
-      // Update last summary time
-      await db.updateSetting('discord_last_summary_at', new Date().toISOString());
-
-      res.json({ success: true, sent: true });
+      res.json({ ok: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error('Discord test error:', error);
+      res.status(500).json({ error: error.response?.data?.message || error.message || 'Discord test failed' });
     }
   });
 }

@@ -10,8 +10,49 @@ import Documents from './components/Documents';
 import Settings from './components/Settings';
 import NotificationSettings from './components/NotificationSettings';
 import InterviewPrep from './components/InterviewPrep';
+import CloudSetupWizard from './components/CloudSetupWizard';
+import { useState, useEffect } from 'react';
 
 function App() {
+  const [cloudConfigured, setCloudConfigured] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const checkCloud = async () => {
+      try {
+        const res = await fetch('/api/sync/status');
+        const status = await res.json();
+        // If the sync engine is initialized and has config, we're good
+        setCloudConfigured(status.hasConfig);
+      } catch (err) {
+        console.error('Failed to check cloud status:', err);
+        setCloudConfigured(false);
+      }
+    };
+    checkCloud();
+  }, []);
+
+  if (cloudConfigured === null) {
+    return (
+      <div style={{ height: '100vh', width: '100vw', backgroundColor: '#020617', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{
+          width: '2rem',
+          height: '2rem',
+          border: '2px solid #3b82f6',
+          borderBottomColor: 'transparent',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite'
+        }}></div>
+        <style>{`
+          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        `}</style>
+      </div>
+    );
+  }
+
+  if (cloudConfigured === false) {
+    return <CloudSetupWizard onComplete={() => setCloudConfigured(true)} />;
+  }
+
   return (
     <BrowserRouter>
       <Layout>

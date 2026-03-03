@@ -61,6 +61,20 @@ latest.yml
 desktop/node-portable/
 desktop/node.zip
 
+# Lambda packaging artifacts
+lambda-src/
+client/public/lambda-deployment.zip
+client/dist/lambda-deployment.zip
+
+# Scratch files, data, and logs
+*.diff
+*.xlsx
+*.xls
+*.csv
+*.pdf
+client/build_log*.txt
+2025_Gaz_place_national/
+
 # Documentation (exclude all markdown files except README.md)
 *.md
 !README.md

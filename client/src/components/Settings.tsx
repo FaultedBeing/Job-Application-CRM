@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
-import { Download, Trash2 } from 'lucide-react';
+import { Download, Trash2, Cloud, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ConfirmDialog from './ConfirmDialog';
 
@@ -738,6 +738,59 @@ export default function Settings() {
             Open
           </Link>
         </div>
+      </section>
+
+      {/* Cloud Migration */}
+      <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem', border: '1px solid #3b82f633' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+          <div style={{ padding: '0.5rem', backgroundColor: '#3b82f61a', borderRadius: '8px', color: '#3b82f6' }}>
+            <Cloud size={24} />
+          </div>
+          <h2 style={{ fontSize: '1.25rem', color: '#e5e7eb', margin: 0 }}>Cloud Migration</h2>
+        </div>
+        <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
+          If you have existing data from the non-cloud version, you can migrate it to your currently connected cloud account. This will assign all unowned local records to your user ID and sync them to Supabase.
+        </p>
+        <button
+          onClick={() => {
+            setPendingConfirm({
+              title: 'Migrate Local Data',
+              message: 'This will move all current local records to your cloud account. This action is safe but should only be done once per account. Proceed?',
+              confirmLabel: 'Migrate Now',
+              confirmColor: '#3b82f6',
+              onConfirm: async () => {
+                setPendingConfirm(null);
+                try {
+                  showToast('Starting migration...', 'info');
+                  // We'll use the user info from settings or a default
+                  // For now, the server handles it if we send the right request
+                  // Let's assume we have a way to know the current userId or just use 'admin' as fallback
+                  const userId = localStorage.getItem('cloud_user_id') || 'admin';
+                  await api.post('/api/sync/migrate', { userId });
+                  showToast('Migration complete! Syncing in progress.', 'success');
+                } catch (error) {
+                  console.error('Migration error:', error);
+                  showToast('Migration failed. Check console for details.', 'error');
+                }
+              }
+            });
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.75rem 1.5rem',
+            backgroundColor: '#3b82f6',
+            border: 'none',
+            borderRadius: '6px',
+            color: '#fff',
+            fontWeight: 'bold',
+            cursor: 'pointer'
+          }}
+        >
+          <RefreshCw size={20} />
+          Migrate Local Data to Cloud
+        </button>
       </section>
 
       {/* Data Management */}

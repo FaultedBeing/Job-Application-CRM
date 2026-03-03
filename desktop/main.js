@@ -384,7 +384,7 @@ function setupSpellcheckAndContextMenu(win) {
 
 function loadUpdateSettings() {
   return new Promise((resolve) => {
-    http.get('http://localhost:3000/api/settings', (res) => {
+    http.get('http://localhost:3001/api/settings', (res) => {
       let data = '';
       res.on('data', (chunk) => {
         data += chunk;
@@ -673,7 +673,7 @@ function createTray() {
         }
       }
     ]);
-    tray.setToolTip('Job Application Tracker');
+    tray.setToolTip('Job Application CRM - Cloud');
     tray.setContextMenu(contextMenu);
     tray.on('double-click', () => {
       if (mainWindow) {
@@ -713,7 +713,7 @@ function apiRequest(method, apiPath, body) {
     const req = http.request(
       {
         hostname: 'localhost',
-        port: 3000,
+        port: 3001,
         path: `/api${apiPath.startsWith('/') ? apiPath : `/${apiPath}`}`,
         method,
         headers: data
@@ -787,7 +787,7 @@ async function deliverDesktopNotifications(settings) {
         if (mainWindow) {
           mainWindow.show();
           mainWindow.focus();
-          mainWindow.loadURL(`http://localhost:3000/?notifications=1`).catch(() => { });
+          mainWindow.loadURL(`http://localhost:3001/?notifications=1`).catch(() => { });
         }
       });
       notif.show();
@@ -1010,271 +1010,21 @@ async function hydrateNotificationLabels(pending) {
   }
 }
 
-function buildSummaryEmailHtml(pending, baseUrl) {
-  const groups = { contact: [], company: [], interaction: [], other: [] };
-  for (const n of pending) {
-    const t = n.entity_type;
-    if (t === 'contact') groups.contact.push(n);
-    else if (t === 'company') groups.company.push(n);
-    else if (t === 'interaction') groups.interaction.push(n);
-    else groups.other.push(n);
-  }
 
-  function section(title, items) {
-    if (!items || items.length === 0) return '';
-    const rows = items
-      .map((n) => {
-        const who = escapeHtml(primaryLabel(n));
-        const msg = escapeHtml(n.message || '');
-        const due = n.due_at ? escapeHtml(formatDueNoSeconds(n.due_at)) : '';
-        const httpLink = n.link_path ? `${baseUrl}${n.link_path}` : `${baseUrl}/?notifications=1`;
-        const deepLink = n.link_path ? `jobtracker://open?path=${encodeURIComponent(n.link_path)}` : 'jobtracker://open';
-        return `
-          <tr>
-            <td style="padding:12px 12px;border-top:1px solid #2d3139;">
-              <div style="display:flex;gap:12px;align-items:flex-start;">
-                ${n.logo_url ? `
-                <div style="width:40px;height:40px;background-color:${n.icon_bg || '#1a1d24'};border-radius:6px;padding:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:1px solid #2d3139;">
-                  <img src="${escapeHtml(n.logo_url)}" style="max-width:100%;max-height:100%;object-fit:contain;">
-                </div>
-                ` : ''}
-                <div style="flex:1;">
-                  <div style="font-weight:700;color:#e5e7eb;margin-bottom:2px;">${who}</div>
-                  <div style="color:#9ca3af;font-size:12px;margin-bottom:4px;">${msg}</div>
-                  <div style="color:#6b7280;font-size:12px;">Due: ${due}</div>
-                  <div style="margin-top:8px;">
-                    <div style="color:#4b5563;font-size:11px;">
-                      Open in your browser:<br>
-                      <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </td>
-          </tr>
-        `;
-      })
-      .join('\n');
+// Notifications are now handled via the Cloud Lambda.
+// Local app only handles Desktop popups.
 
-    return `
-      <div style="margin-top:18px;">
-        <div style="font-size:14px;font-weight:800;color:#fbbf24;margin-bottom:8px;">${escapeHtml(title)}</div>
-        <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border:1px solid #2d3139;border-radius:10px;overflow:hidden;background:#0f1115;">
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-      </div>
-    `;
-  }
 
-  const total = pending.length;
-  return `
-    <div style="background:#0f1115;color:#e5e7eb;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;padding:24px;">
-      <div style="max-width:720px;margin:0 auto;">
-        <div style="font-size:18px;font-weight:900;color:#fbbf24;margin-bottom:6px;">Job Application Tracker</div>
-        <div style="font-size:14px;color:#9ca3af;margin-bottom:16px;">
-          You have <strong style="color:#e5e7eb;">${total}</strong> follow-up${total === 1 ? '' : 's'} due.
-        </div>
-
-        ${section('Contacts', groups.contact)}
-        ${section('Companies', groups.company)}
-        ${section('Interactions', groups.interaction)}
-        ${section('Other', groups.other)}
-
-        <div style="margin-top:22px;color:#6b7280;font-size:12px;line-height:1.4;">
-          Tip: Open the app and click <strong style="color:#9ca3af;">Alerts</strong> to view and dismiss items.
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function buildSummaryEmailText(pending, baseUrl) {
-  const lines = pending.map((n) => {
-    const who = primaryLabel(n);
-    const due = n.due_at ? formatDueNoSeconds(n.due_at) : '';
-    const httpLink = n.link_path ? `${baseUrl}${n.link_path}` : `${baseUrl}/?notifications=1`;
-    return `- ${who}: ${n.message}${due ? ` (due ${due})` : ''}\n  View in browser: ${httpLink}`;
-  });
-  return lines.join('\n\n');
-}
-
-async function sendEmailToSelfHtml(subject, htmlBody, textBody, clientIdOverride, recipientOverride) {
-  const tok = readGmailToken();
-  const clientId = clientIdOverride || tok?.client_id;
-  const clientSecret = tok?.client_secret || '';
-  if (!clientId) throw new Error('Missing Gmail client ID');
-  if (!tok?.email) throw new Error('Connected email unknown');
-  const accessToken = await ensureFreshAccessToken(clientId, clientSecret);
-  const to = recipientOverride || tok.email;
-
-  const boundary = `b_${crypto.randomBytes(12).toString('hex')}`;
-  const mime =
-    `To: ${to}\r\n` +
-    `Subject: ${subject}\r\n` +
-    `MIME-Version: 1.0\r\n` +
-    `Content-Type: multipart/alternative; boundary="${boundary}"\r\n` +
-    `\r\n` +
-    `--${boundary}\r\n` +
-    `Content-Type: text/plain; charset="UTF-8"\r\n\r\n` +
-    `${textBody}\r\n\r\n` +
-    `--${boundary}\r\n` +
-    `Content-Type: text/html; charset="UTF-8"\r\n\r\n` +
-    `${htmlBody}\r\n\r\n` +
-    `--${boundary}--\r\n`;
-
-  const raw = base64UrlEncode(Buffer.from(mime, 'utf-8'));
-  await httpGmailSend(accessToken, raw);
-}
-
-async function deliverEmailNotifications(settings) {
-  try {
-    const gmailEnabled = String(settings.gmail_enabled || 'false') === 'true';
-    const smtpEnabled = String(settings.smtp_enabled || 'false') === 'true';
-    const priority = (settings.email_provider_priority || 'gmail').trim();
-    const clientId = settings.gmail_client_id || null;
-    const recipient = (settings.gmail_recipient || '').trim() || null;
-
-    // Check which providers are actually usable
-    let gmailUsable = false;
-    if (gmailEnabled) {
-      const tok = readGmailToken();
-      if (tok?.refresh_token) {
-        gmailUsable = true;
-        if (clientId && tok.client_id !== clientId) {
-          writeGmailToken({ ...tok, client_id: clientId });
-        }
-      }
-    }
-    const smtpUsable = smtpEnabled && !!settings.smtp_host;
-
-    // Pick provider based on user's chosen priority
-    let provider = null; // 'gmail' | 'smtp'
-    if (priority === 'smtp') {
-      if (smtpUsable) provider = 'smtp';
-      else if (gmailUsable) provider = 'gmail';
-    } else {
-      if (gmailUsable) provider = 'gmail';
-      else if (smtpUsable) provider = 'smtp';
-    }
-    if (!provider) return;
-
-    const now = new Date().toISOString();
-    const pending = await apiRequest(
-      'GET',
-      `/notifications/pending?channel=email&now=${encodeURIComponent(now)}&limit=50`,
-      null
-    );
-    if (!Array.isArray(pending) || pending.length === 0) return;
-
-    await hydrateNotificationLabels(pending);
-
-    const threshold = parseInt(settings.notification_email_summary_threshold || '5', 10) || 5;
-    const count = pending.length;
-    const base = 'http://localhost:3000';
-
-    async function sendViaProvider(subject, html, text) {
-      if (provider === 'gmail') {
-        await sendEmailToSelfHtml(subject, html, text, clientId, recipient);
-      } else {
-        // SMTP — delegate to server
-        await apiRequest('POST', '/smtp/send', { subject, html, text });
-      }
-    }
-
-    if (count >= threshold) {
-      const html = buildSummaryEmailHtml(pending, base);
-      const text = buildSummaryEmailText(pending, base);
-      await sendViaProvider(`Follow-up reminders (${count})`, html, text);
-      await Promise.all(
-        pending.map((n) => apiRequest('POST', `/notifications/${n.id}/delivered`, { channel: 'email' }).catch(() => null))
-      );
-      return;
-    }
-
-    // Under threshold: individual emails
-    for (const n of pending) {
-      const linkPath = n.link_path || '/?notifications=1';
-      const deepLink = `jobtracker://open?path=${encodeURIComponent(n.link_path || '/?notifications=1')}`;
-      const httpLink = `${base}${linkPath}`;
-      const who = primaryLabel(n);
-      const due = n.due_at ? formatDueNoSeconds(n.due_at) : '';
-      const text = `${n.message}${due ? `\n\nDue: ${due}` : ''}\n\n${who}\nOpen in app: ${deepLink}\nOpen in browser: ${httpLink}`;
-      const html = `
-        <div style="background:#0f1115;color:#e5e7eb;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;padding:24px;">
-          <div style="max-width:720px;margin:0 auto;">
-            <div style="font-size:18px;font-weight:900;color:#fbbf24;margin-bottom:10px;">Job Application Tracker</div>
-            
-            <div style="display:flex;gap:16px;align-items:center;margin-bottom:16px;">
-              ${n.logo_url ? `
-              <div style="width:48px;height:48px;background-color:${n.icon_bg || '#1a1d24'};border-radius:8px;padding:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:1px solid #2d3139;">
-                <img src="${escapeHtml(n.logo_url)}" style="max-width:100%;max-height:100%;object-fit:contain;">
-              </div>
-              ` : ''}
-              <div>
-                <div style="font-size:16px;color:#e5e7eb;font-weight:800;margin-bottom:2px;">${escapeHtml(who)}</div>
-                ${due ? `<div style="color:#6b7280;font-size:12px;">Due: ${escapeHtml(due)}</div>` : ''}
-              </div>
-            </div>
-
-            <div style="color:#e5e7eb;line-height:1.4;margin-bottom:12px;padding:12px;background:#1a1d24;border-radius:8px;border:1px solid #2d3139;">
-              ${escapeHtml(n.message || '')}
-            </div>
-
-            <div style="color:#4b5563;font-size:11px;margin-top:16px;">
-              Open in your browser:<br>
-              <a href="${escapeHtml(httpLink)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(httpLink)}</a>
-            </div>
-          </div>
-        </div>
-      `;
-      await sendViaProvider(`${who}`, html, text);
-      await apiRequest('POST', `/notifications/${n.id}/delivered`, { channel: 'email' });
-    }
-  } catch (e) {
-    console.warn('[EmailReminders] Failed to send reminder email:', e?.message || e);
-  }
-}
-
-async function pollNotifications() {
-  const settings = await fetchAppSettings();
-  await apiRequest('POST', '/notifications/sync-due', { now: new Date().toISOString() }).catch(() => null);
-  await deliverDesktopNotifications(settings);
-  await deliverEmailNotifications(settings);
-}
-
-function startReminderPolling() {
+function startPolling() {
   if (reminderPollInterval) return;
   pollNotifications();
   reminderPollInterval = setInterval(pollNotifications, 30 * 1000);
 }
 
-function stopReminderPolling() {
+function stopPolling() {
   if (reminderPollInterval) {
     clearInterval(reminderPollInterval);
     reminderPollInterval = null;
-  }
-}
-
-function pollDiscordSummary() {
-  console.log('[Discord Polling] Window active, triggering summary check...');
-  apiRequest('POST', '/discord/send-summary', {}).catch((err) => {
-    console.error('[Discord Polling] Error calling send-summary:', err.message || err);
-  });
-}
-
-function startDiscordPolling() {
-  if (discordPollInterval) return;
-  pollDiscordSummary();
-  // Poll every 30 minutes
-  discordPollInterval = setInterval(pollDiscordSummary, 30 * 60 * 1000);
-}
-
-function stopDiscordPolling() {
-  if (discordPollInterval) {
-    clearInterval(discordPollInterval);
-    discordPollInterval = null;
   }
 }
 
@@ -1352,7 +1102,7 @@ function createWindow() {
     encodeURIComponent(`
       <html>
         <head>
-          <title>Job Application Tracker</title>
+          <title>Cloud Job Application Tracker</title>
           <style>
             body { margin:0; background:#0f1115; color:#e5e7eb; display:flex; align-items:center; justify-content:center; font-family:system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
             .box { text-align:center; }
@@ -1390,7 +1140,7 @@ function createWindow() {
         <body>
           <div class="box">
             <div class="spinner"></div>
-            <div>Starting Job Tracker...</div>
+            <div>Starting Cloud Job Application Tracker...</div>
             <div id="status" class="status">Booting backend server...</div>
             <div class="bar-container">
               <div id="bar" class="bar-fill"></div>
@@ -1418,13 +1168,12 @@ function createWindow() {
   startServer();
 
   // Once server responds, load frontend
-  waitForServer('http://localhost:3000/health')
+  waitForServer('http://localhost:3001/health')
     .then(() => {
       updateSplashStatus('Loading interface...', 90);
       if (mainWindow) {
-        startReminderPolling();
-        startDiscordPolling();
-        const target = pendingDeepLink ? null : 'http://localhost:3000';
+        startPolling();
+        const target = pendingDeepLink ? null : 'http://localhost:3001';
         if (target) {
           mainWindow.loadURL(target);
         }
@@ -1477,7 +1226,7 @@ function startServer() {
   const env = {
     ...process.env,
     NODE_ENV: isDev ? 'development' : 'production',
-    PORT: '3000',
+    PORT: '3001',
     RESOURCES_PATH: isDev ? path.join(__dirname, '..') : process.resourcesPath,
     FRONTEND_PATH: frontendPath,
     APPDATA: app.getPath('userData')
@@ -1839,7 +1588,6 @@ app.whenReady().then(() => {
   createTray();
   createWindow();
   setupAutoUpdater();
-  showFirstBootWelcome();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -1853,19 +1601,5 @@ app.on('window-all-closed', () => {
   if (serverProcess) {
     serverProcess.kill();
   }
-  stopReminderPolling();
-  stopDiscordPolling();
-
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
-
-app.on('before-quit', () => {
-  // Kill server process
-  if (serverProcess) {
-    serverProcess.kill();
-  }
-  stopReminderPolling();
-  stopDiscordPolling();
+  stopPolling();
 });
