@@ -44,5 +44,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   quitAndInstallUpdate: () => {
     ipcRenderer.send('quit-and-install');
+  },
+  setAutoLaunch: (enabled) => {
+    ipcRenderer.send('set-auto-launch', enabled);
   }
 });

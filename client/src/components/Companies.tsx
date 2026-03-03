@@ -23,11 +23,12 @@ interface Company {
   location?: string;
   nearest_reminder?: string;
   financial_stability_warning?: boolean;
+  excitement_rating?: number;
 }
 
 export default function Companies() {
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [sortBy, setSortBy] = useSessionStorage<'recent' | 'name' | 'jobs' | 'industry'>('companies_sortBy', 'recent');
+  const [sortBy, setSortBy] = useSessionStorage<'recent' | 'name' | 'jobs' | 'industry' | 'excitement'>('companies_sortBy', 'recent');
   const [showAddModal, setShowAddModal] = useState(false);
   const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -145,6 +146,8 @@ export default function Companies() {
         comparison = (a.job_count || 0) - (b.job_count || 0);
       } else if (sortBy === 'industry') {
         comparison = (a.industry || '').localeCompare(b.industry || '');
+      } else if (sortBy === 'excitement') {
+        comparison = (a.excitement_rating || 0) - (b.excitement_rating || 0);
       } else {
         const aTime = a.last_interaction ? new Date(a.last_interaction).getTime() : 0;
         const bTime = b.last_interaction ? new Date(b.last_interaction).getTime() : 0;
@@ -295,6 +298,7 @@ export default function Companies() {
               <option value="name">Sort by Name</option>
               <option value="jobs">Sort by Job Count</option>
               <option value="industry">Sort by Industry</option>
+              <option value="excitement">Sort by Excitement</option>
             </select>
             <button
               onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
@@ -444,125 +448,150 @@ export default function Companies() {
               e.currentTarget.style.borderColor = '#2d3139';
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', marginBottom: '0.5rem' }}>
-              {company.logo_url && (
-                <div
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '4px',
-                    padding: '4px',
-                    backgroundColor: company.dark_logo_bg ? '#e5e7eb' : '#0f1115',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <img
-                    src={company.logo_url}
-                    alt={`${company.name} logo`}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', marginBottom: '0.5rem' }}>
+                {company.logo_url && (
+                  <div
                     style={{
-                      maxWidth: '100%',
-                      maxHeight: '100%',
-                      objectFit: 'contain'
-                    }}
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none';
-                      debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
-                    }}
-                  />
-                </div>
-              )}
-              <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <h3 style={{ fontSize: '1.25rem', color: '#e5e7eb', margin: 0 }}>
-                    {company.name}
-                  </h3>
-                  {!!company.no_posted_jobs && (
-                    <span style={{
-                      display: 'inline-flex',
-                      padding: '0.15rem 0.5rem',
-                      borderRadius: '999px',
-                      backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                      color: '#f87171',
-                      fontSize: '0.65rem',
-                      fontWeight: 600,
-                      border: '1px solid rgba(239, 68, 68, 0.3)',
-                      whiteSpace: 'nowrap'
-                    }}>
-                      No Posted Jobs
-                    </span>
-                  )}
-                  {!!company.no_appropriate_jobs && (
-                    <span style={{
-                      display: 'inline-flex',
-                      padding: '0.15rem 0.5rem',
-                      borderRadius: '999px',
-                      backgroundColor: 'rgba(249, 115, 22, 0.15)',
-                      color: '#fb923c',
-                      fontSize: '0.65rem',
-                      fontWeight: 600,
-                      border: '1px solid rgba(249, 115, 22, 0.3)',
-                      whiteSpace: 'nowrap'
-                    }}>
-                      No Appropriate Jobs
-                    </span>
-                  )}
-                  {!!company.financial_stability_warning && (
-                    <span style={{
-                      display: 'inline-flex',
-                      padding: '0.15rem 0.5rem',
-                      borderRadius: '999px',
-                      backgroundColor: 'rgba(239, 68, 68, 0.25)',
-                      color: '#f87171',
-                      fontSize: '0.65rem',
-                      fontWeight: 700,
-                      border: '1px solid #f87171',
-                      whiteSpace: 'nowrap',
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '4px',
+                      padding: '4px',
+                      backgroundColor: company.dark_logo_bg ? '#e5e7eb' : '#0f1115',
+                      display: 'flex',
                       alignItems: 'center',
-                      gap: '0.25rem'
-                    }}>
-                      <AlertTriangle size={10} />
-                      Questionable Funds
-                    </span>
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}
+                  >
+                    <img
+                      src={company.logo_url}
+                      alt={`${company.name} logo`}
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '100%',
+                        objectFit: 'contain'
+                      }}
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                        debugLog(`Failed to load company logo: ${(e.target as HTMLImageElement).src}`);
+                      }}
+                    />
+                  </div>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minWidth: 0 }}>
+                    <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#e5e7eb', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: 1 }}>{company.name}</h3>
+                    {company.excitement_rating !== undefined && company.excitement_rating > 0 && (
+                      <div style={{ display: 'flex', gap: '0.25rem', color: '#fbbf24', fontSize: '0.85rem', flexShrink: 0, marginLeft: '0.5rem' }} title="Excitement Rating">
+                        ★ {company.excitement_rating}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', minWidth: 0 }}>
+                    {!!company.no_posted_jobs && (
+                      <span style={{
+                        display: 'inline-flex',
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: '999px',
+                        backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                        color: '#f87171',
+                        fontSize: '0.65rem',
+                        fontWeight: 600,
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        whiteSpace: 'nowrap',
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        No Posted Jobs
+                      </span>
+                    )}
+                    {!!company.no_appropriate_jobs && (
+                      <span style={{
+                        display: 'inline-flex',
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: '999px',
+                        backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                        color: '#fb923c',
+                        fontSize: '0.65rem',
+                        fontWeight: 600,
+                        border: '1px solid rgba(249, 115, 22, 0.3)',
+                        whiteSpace: 'nowrap',
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        No Appropriate Jobs
+                      </span>
+                    )}
+                    {!!company.financial_stability_warning && (
+                      <span style={{
+                        display: 'inline-flex',
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: '999px',
+                        backgroundColor: 'rgba(239, 68, 68, 0.25)',
+                        color: '#f87171',
+                        fontSize: '0.65rem',
+                        fontWeight: 700,
+                        border: '1px solid #f87171',
+                        whiteSpace: 'nowrap',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        <AlertTriangle size={10} style={{ flexShrink: 0 }} />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>Questionable Funds</span>
+                      </span>
+                    )}
+                  </div>
+                  {company.nearest_reminder && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', backgroundColor: '#fbbf2420', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem', flexShrink: 0, marginTop: '0.25rem', alignSelf: 'flex-start', maxWidth: '100%', overflow: 'hidden' }} title="Upcoming Reminder">
+                      <Bell size={12} style={{ flexShrink: 0 }} />
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {new Date(company.nearest_reminder).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      </span>
+                    </div>
                   )}
                 </div>
-                {company.nearest_reminder && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', backgroundColor: '#fbbf2420', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem', flexShrink: 0 }} title="Upcoming Reminder">
-                    <Bell size={12} />
-                    {new Date(company.nearest_reminder).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {company.industry && (
+                  <p style={{ color: '#9ca3af', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{company.industry}</p>
+                )}
+                {(company.employee_count || company.company_size) && (
+                  <p style={{ color: '#9ca3af', margin: 0, fontSize: '0.875rem' }}>
+                    {company.company_size || `${company.employee_count} employees`}
+                  </p>
+                )}
+                {company.website && (
+                  <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <a
+                      href={getWebsiteHref(company.website)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}
+                    >
+                      {formatWebsiteDisplay(company.website)}
+                    </a>
                   </div>
                 )}
               </div>
-            </div>
-            {company.industry && (
-              <p style={{ color: '#9ca3af', marginBottom: '0.5rem' }}>{company.industry}</p>
-            )}
-            {(company.employee_count || company.company_size) && (
-              <p style={{ color: '#9ca3af', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
-                {company.company_size || `${company.employee_count} employees`}
-              </p>
-            )}
-            {company.website && (
-              <a
-                href={getWebsiteHref(company.website)}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                style={{ color: '#3b82f6', fontSize: '0.875rem', textDecoration: 'none' }}
-              >
-                {formatWebsiteDisplay(company.website)}
-              </a>
-            )}
-            <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
-              <span style={{ color: '#9ca3af', fontSize: '0.875rem' }}>
-                {company.job_count} job{company.job_count !== 1 ? 's' : ''}
-              </span>
-              {company.latest_status && (
-                <span style={{ color: '#9ca3af', fontSize: '0.875rem' }}>
-                  Latest: {company.latest_status}
+
+              <div style={{ marginTop: '0.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                <span style={{ color: '#9ca3af', fontSize: '0.875rem', whiteSpace: 'nowrap' }}>
+                  {company.job_count} job{company.job_count !== 1 ? 's' : ''}
                 </span>
-              )}
+                {company.latest_status && (
+                  <span style={{ color: '#9ca3af', fontSize: '0.875rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+                    Latest: {company.latest_status}
+                  </span>
+                )}
+              </div>
             </div>
           </Link>
         ))}
@@ -606,7 +635,8 @@ function AddCompanyModal({ onClose, onSave }: { onClose: () => void; onSave: (da
     location: '',
     notes: '',
     company_size: '',
-    financial_stability_warning: false
+    financial_stability_warning: false,
+    excitement_rating: 0
   });
   const [industryOptions, setIndustryOptions] = useState<string[]>([]);
 
@@ -656,6 +686,7 @@ function AddCompanyModal({ onClose, onSave }: { onClose: () => void; onSave: (da
       notes: formData.notes || null,
       company_size: formData.company_size || null,
       financial_stability_warning: formData.financial_stability_warning ? 1 : 0,
+      excitement_rating: formData.excitement_rating || 0,
       employee_count: null
     });
   }
@@ -785,6 +816,28 @@ function AddCompanyModal({ onClose, onSave }: { onClose: () => void; onSave: (da
               <option value="1001–5000">1001–5000</option>
               <option value="5001–10000">5001–10000</option>
               <option value="10001+">10001+</option>
+            </select>
+          </div>
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>Excitement Rating</label>
+            <select
+              value={formData.excitement_rating}
+              onChange={(e) => setFormData({ ...formData, excitement_rating: parseInt(e.target.value) || 0 })}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                backgroundColor: '#0f1115',
+                border: '1px solid #2d3139',
+                borderRadius: '6px',
+                color: '#e5e7eb'
+              }}
+            >
+              <option value="0">Unrated</option>
+              <option value="1">1 - Low</option>
+              <option value="2">2 - Fair</option>
+              <option value="3">3 - Good</option>
+              <option value="4">4 - High</option>
+              <option value="5">5 - Must Have</option>
             </select>
           </div>
           <div style={{ marginBottom: '1rem' }}>

@@ -6,6 +6,8 @@ import path from 'path';
 import { fetchCompanyLogo, fetchCompanyInfo } from './companyEnrichment';
 import nodemailer from 'nodemailer';
 import * as XLSX from 'xlsx';
+import { DiscordService } from './discordService';
+import { ActivityService } from './activityService';
 
 export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsPath: string) {
   // Companies
@@ -657,6 +659,49 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
     }
   });
 
+  // Interview Questions
+  app.get('/api/interview-questions', async (req: Request, res: Response) => {
+    try {
+      const questions = await db.getInterviewQuestions();
+      res.json(questions);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/interview-questions', async (req: Request, res: Response) => {
+    try {
+      console.log('Incoming POST /api/interview-questions', req.body);
+      const question = await db.createInterviewQuestion(req.body);
+      console.log('Successfully created interview question', question);
+      res.status(201).json(question);
+    } catch (error: any) {
+      console.error('Error creating interview question:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put('/api/interview-questions/:id', async (req: Request, res: Response) => {
+    try {
+      console.log(`Incoming PUT /api/interview-questions/${req.params.id}`, req.body);
+      const question = await db.updateInterviewQuestion(parseInt(req.params.id), req.body);
+      console.log('Successfully updated interview question', question);
+      res.json(question);
+    } catch (error: any) {
+      console.error(`Error updating interview question ${req.params.id}:`, error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete('/api/interview-questions/:id', async (req: Request, res: Response) => {
+    try {
+      await db.deleteInterviewQuestion(parseInt(req.params.id));
+      res.status(204).send();
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Settings
   app.get('/api/settings', async (req: Request, res: Response) => {
     try {
@@ -1117,6 +1162,82 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
 
       await fs.remove(req.file.path);
       res.json({ imported, skipped, errors });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Discord & Activity
+  const activityService = new ActivityService(db);
+
+  app.get('/api/activity/summary', async (req: Request, res: Response) => {
+    try {
+      const summary = await activityService.generateDailySummary();
+      res.json({ summary });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/discord/test', async (req: Request, res: Response) => {
+    try {
+      const { token, channelId } = req.body;
+      const result = await DiscordService.sendMessage(token, channelId, "The bot is configured correctly");
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/discord/send-summary', async (req: Request, res: Response) => {
+    try {
+      const settings = await db.getSettings();
+      const token = settings.discord_bot_token;
+      const channelId = settings.discord_recipient_id;
+
+      if (!token || !channelId) {
+        return res.status(400).json({ error: 'Discord token and channel ID are not configured.' });
+      }
+
+      const now = new Date();
+      let lastTime = new Date(0); // Epoch if never sent
+      if (settings.discord_last_summary_at) {
+        lastTime = new Date(settings.discord_last_summary_at);
+      }
+
+      const msSinceLast = now.getTime() - lastTime.getTime();
+      const hoursSinceLast = Math.floor(msSinceLast / (1000 * 60 * 60));
+
+      let shouldSend = false;
+      let summaryToSend = "";
+
+      if (settings.discord_last_summary_at && hoursSinceLast >= 24) {
+        // Missed a day or more
+        summaryToSend = `**System Alert**\nThe software was not opened for ${hoursSinceLast} hours. No daily summaries were sent during this period.`;
+        shouldSend = true;
+      } else {
+        // Normal daily check
+        const currentHour = now.getHours();
+        const inWindow = currentHour >= 17 && currentHour <= 23;
+        const sameDay = lastTime.getDate() === now.getDate() && lastTime.getMonth() === now.getMonth() && lastTime.getFullYear() === now.getFullYear();
+
+        if (inWindow && !sameDay) {
+          summaryToSend = await activityService.generateDailySummary();
+          shouldSend = true;
+        }
+      }
+
+      if (!shouldSend) {
+        // Not time to send yet, or already sent today.
+        return res.json({ success: true, sent: false });
+      }
+
+      await DiscordService.sendMessage(token, channelId, summaryToSend);
+
+      // Update last summary time
+      await db.updateSetting('discord_last_summary_at', new Date().toISOString());
+
+      res.json({ success: true, sent: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

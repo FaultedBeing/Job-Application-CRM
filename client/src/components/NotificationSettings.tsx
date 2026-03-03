@@ -26,6 +26,21 @@ export default function NotificationSettings() {
   const [smtpSecure, setSmtpSecure] = useState(true);
   const [smtpRecipient, setSmtpRecipient] = useState('');
 
+  // Discord Bot
+  interface DiscordRecipient {
+    id: string;
+    addedAt: string;
+    name?: string;
+  }
+  const [showDiscordSection, setShowDiscordSection] = useState(false);
+  const [discordEnabled, setDiscordEnabled] = useState(false);
+  const [discordToken, setDiscordToken] = useState('');
+  const [discordRecipients, setDiscordRecipients] = useState<DiscordRecipient[]>([]);
+  const [newRecipientInput, setNewRecipientInput] = useState('');
+  const [newRecipientName, setNewRecipientName] = useState('');
+  const [testingDiscord, setTestingDiscord] = useState(false);
+  const [showDiscordWizard, setShowDiscordWizard] = useState(false);
+
   // Provider priority
   const [emailProvider, setEmailProvider] = useState<'gmail' | 'smtp'>('gmail');
 
@@ -49,7 +64,7 @@ export default function NotificationSettings() {
     gmailClientId, gmailClientSecret, gmailEnabled, gmailRecipient,
     emailProvider, smtpEnabled, smtpHost, smtpPort, smtpUser, smtpPass,
     smtpFrom, smtpSecure, smtpRecipient, desktopSummaryThreshold,
-    emailSummaryThreshold, initialLoaded
+    emailSummaryThreshold, discordEnabled, discordToken, discordRecipients, initialLoaded
   ]);
 
   function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
@@ -87,6 +102,38 @@ export default function NotificationSettings() {
       // If SMTP settings exist, open the section so the user sees them
       if (res.data.smtp_host) setShowSmtpSection(true);
 
+      // Discord
+      setDiscordEnabled(res.data.discord_enabled === 'true');
+      const dToken = res.data.discord_bot_token || '';
+      setDiscordToken(dToken);
+
+      let parsedRecipients: DiscordRecipient[] = [];
+      if (res.data.discord_recipient_id) {
+        try {
+          const parsed = JSON.parse(res.data.discord_recipient_id);
+          if (Array.isArray(parsed)) {
+            parsedRecipients = parsed;
+          } else if (typeof res.data.discord_recipient_id === 'string' && res.data.discord_recipient_id.trim().length > 0) {
+            // Legacy support: if it's not JSON, it might just be the old string format
+            parsedRecipients = res.data.discord_recipient_id.split(',').map((id: string) => ({
+              id: id.trim(),
+              addedAt: new Date().toISOString()
+            })).filter((r: DiscordRecipient) => r.id.length > 0);
+          }
+        } catch (_e) {
+          // If JSON parse fails, try legacy format
+          if (typeof res.data.discord_recipient_id === 'string' && res.data.discord_recipient_id.trim().length > 0) {
+            parsedRecipients = res.data.discord_recipient_id.split(',').map((id: string) => ({
+              id: id.trim(),
+              addedAt: new Date().toISOString()
+            })).filter((r: DiscordRecipient) => r.id.length > 0);
+          }
+        }
+      }
+      setDiscordRecipients(parsedRecipients);
+
+      if (dToken) setShowDiscordSection(true);
+
       // Gmail OAuth status
       try {
         const anyWindow = window as any;
@@ -118,6 +165,9 @@ export default function NotificationSettings() {
         smtp_from: smtpFrom || '',
         smtp_secure: smtpSecure ? 'true' : 'false',
         smtp_recipient: smtpRecipient || '',
+        discord_enabled: discordEnabled ? 'true' : 'false',
+        discord_bot_token: discordToken,
+        discord_recipient_id: JSON.stringify(discordRecipients),
         notification_desktop_summary_threshold: String(desktopSummaryThreshold),
         notification_email_summary_threshold: String(emailSummaryThreshold)
       });
@@ -211,6 +261,53 @@ export default function NotificationSettings() {
     } finally {
       setGmailBusy(false);
     }
+  }
+
+  async function testDiscordSettings() {
+    if (!discordToken || discordRecipients.length === 0) {
+      showToast('Token and at least one Recipient ID are required for testing.', 'error');
+      return;
+    }
+
+    setTestingDiscord(true);
+    try {
+      const channelIdsString = discordRecipients.map(r => r.id).join(',');
+      await api.post('/discord/test', {
+        token: discordToken,
+        channelId: channelIdsString
+      });
+      showToast('Test message sent to Discord!', 'success');
+    } catch (error: any) {
+      console.error('Discord test error:', error);
+      showToast(error.response?.data?.error || 'Failed to send test message.', 'error');
+    } finally {
+      setTestingDiscord(false);
+    }
+  }
+
+  function handleAddRecipient() {
+    const val = newRecipientInput.trim();
+    if (!val) return;
+
+    // Check for duplicates
+    if (discordRecipients.some(r => r.id === val)) {
+      showToast('This ID is already in the list.', 'info');
+      setNewRecipientInput('');
+      setNewRecipientName('');
+      return;
+    }
+
+    setDiscordRecipients(prev => [...prev, {
+      id: val,
+      name: newRecipientName.trim() || undefined,
+      addedAt: new Date().toISOString()
+    }]);
+    setNewRecipientInput('');
+    setNewRecipientName('');
+  }
+
+  function handleRemoveRecipient(idToRemove: string) {
+    setDiscordRecipients(prev => prev.filter(r => r.id !== idToRemove));
   }
 
   const inputStyle = {
@@ -417,6 +514,173 @@ export default function NotificationSettings() {
         )}
       </section>
 
+      {/* ===== Discord Bot Accountability (collapsible) ===== */}
+      <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', marginBottom: '2rem', overflow: 'hidden' }}>
+        <button
+          onClick={() => setShowDiscordSection(!showDiscordSection)}
+          style={{
+            width: '100%',
+            padding: '1.25rem 1.5rem',
+            backgroundColor: 'transparent',
+            border: 'none',
+            color: '#e5e7eb',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            textAlign: 'left'
+          }}
+        >
+          {showDiscordSection ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+            <span style={{ fontSize: '1.1rem', fontWeight: 600 }}>Discord Bot Accountability</span>
+            <span style={{ display: 'block', color: '#6b7280', fontSize: '0.8rem', marginTop: '2px' }}>
+              Send a daily summary of your activity to a Discord channel or DM
+            </span>
+          </div>
+        </button>
+
+        {showDiscordSection && (
+          <div style={{ padding: '0 1.5rem 1.5rem' }}>
+            <div style={{ borderTop: '1px solid #2d3139', paddingTop: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', color: '#e5e7eb' }}>
+                  <input
+                    type="checkbox"
+                    checked={discordEnabled}
+                    onChange={(e) => setDiscordEnabled(e.target.checked)}
+                    style={{ width: '20px', height: '20px', cursor: 'pointer', accentColor: '#fbbf24' }}
+                  />
+                  <span>Enable Discord Bot</span>
+                </label>
+                <button
+                  onClick={() => setShowDiscordWizard(true)}
+                  style={{ padding: '0.4rem 0.8rem', backgroundColor: 'transparent', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', cursor: 'pointer', fontSize: '0.85rem' }}
+                >
+                  Setup Wizard
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem', maxWidth: '640px' }}>
+                <div>
+                  <label style={{ display: 'block', color: '#9ca3af', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Bot Token</label>
+                  <input
+                    type="password"
+                    value={discordToken}
+                    onChange={(e) => setDiscordToken(e.target.value)}
+                    placeholder="MTIzNDU2Nzg5..."
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', color: '#9ca3af', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Add Channel / User ID</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) auto', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      value={newRecipientName}
+                      onChange={(e) => setNewRecipientName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddRecipient();
+                        }
+                      }}
+                      placeholder="Name (Optional)"
+                      style={{ ...inputStyle }}
+                    />
+                    <input
+                      type="text"
+                      value={newRecipientInput}
+                      onChange={(e) => setNewRecipientInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddRecipient();
+                        }
+                      }}
+                      placeholder="Enter ID..."
+                      style={{ ...inputStyle }}
+                    />
+                    <button
+                      onClick={handleAddRecipient}
+                      style={{
+                        padding: '0 0.75rem',
+                        backgroundColor: '#3b82f6',
+                        border: 'none',
+                        borderRadius: '6px',
+                        color: '#fff',
+                        fontWeight: 'bold',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {discordRecipients.length > 0 && (
+                <div style={{ marginBottom: '1.5rem', maxWidth: '640px', backgroundColor: '#0f1115', borderRadius: '8px', border: '1px solid #2d3139', overflow: 'hidden' }}>
+                  <div style={{ padding: '0.5rem 1rem', borderBottom: '1px solid #2d3139', backgroundColor: '#1a1d24', color: '#9ca3af', fontSize: '0.85rem', fontWeight: 600 }}>
+                    Configured Endpoints ({discordRecipients.length})
+                  </div>
+                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                    {discordRecipients.map(r => (
+                      <li key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderBottom: '1px solid #2d3139', gap: '1rem' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ color: '#e5e7eb', fontFamily: 'monospace', fontWeight: 600 }}>
+                            {r.name ? `${r.name} (${r.id})` : r.id}
+                          </span>
+                          <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>Added: {new Date(r.addedAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}</span>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveRecipient(r.id)}
+                          style={{
+                            padding: '0.25rem 0.6rem',
+                            backgroundColor: 'transparent',
+                            border: '1px solid #ef4444',
+                            borderRadius: '4px',
+                            color: '#ef4444',
+                            fontSize: '0.8rem',
+                            cursor: 'pointer'
+                          }}
+                          aria-label={`Remove ID ${r.id}`}
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <p style={{ color: '#9ca3af', fontSize: '0.85rem', margin: 0, maxWidth: '400px' }}>
+                  The bot will send a daily summary of your activity to the specified channel/user between 5 PM and 12 AM.
+                </p>
+                <button
+                  onClick={testDiscordSettings}
+                  disabled={testingDiscord || !discordToken || discordRecipients.length === 0}
+                  style={{
+                    padding: '0.6rem 1.25rem',
+                    backgroundColor: testingDiscord ? '#374151' : '#3b82f6',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontWeight: 'bold',
+                    cursor: (testingDiscord || !discordToken || discordRecipients.length === 0) ? 'not-allowed' : 'pointer',
+                    fontSize: '0.9rem',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {testingDiscord ? 'Sending...' : 'Test Connection'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
       {/* ===== Notification Preferences ===== */}
       <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
         <h2 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', color: '#e5e7eb' }}>Notification Preferences</h2>
@@ -506,6 +770,77 @@ export default function NotificationSettings() {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
               <button onClick={() => setShowGmailWizard(false)} style={{ padding: '0.6rem 1rem', backgroundColor: 'transparent', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', cursor: 'pointer' }}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Discord Setup Wizard Modal */}
+      {showDiscordWizard && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, overflowY: 'auto', padding: '2rem 1rem' }} onClick={() => setShowDiscordWizard(false)}>
+          <div style={{ backgroundColor: '#1a1d24', borderRadius: '12px', padding: '1.5rem', width: '100%', maxWidth: '720px', border: '1px solid #2d3139', maxHeight: '90vh', overflowY: 'auto', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexShrink: 0 }}>
+              <div>
+                <h3 style={{ margin: 0, color: '#fbbf24', fontSize: '1.25rem' }}>Discord Bot Setup Wizard</h3>
+                <p style={{ marginTop: '0.5rem', marginBottom: 0, color: '#9ca3af', fontSize: '0.9rem' }}>
+                  Create a Discord bot and configure it to send you or your server daily updates.
+                </p>
+              </div>
+              <button onClick={() => setShowDiscordWizard(false)} style={{ backgroundColor: 'transparent', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '1.25rem', lineHeight: 1 }} aria-label="Close">×</button>
+            </div>
+
+            <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'visible' }}>
+              <div style={{ padding: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '10px' }}>
+                <div style={{ color: '#e5e7eb', fontWeight: 600, marginBottom: '0.35rem' }}>Step 1: Create a Discord Application</div>
+                <div style={{ color: '#9ca3af', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                  <ol style={{ margin: 0, paddingLeft: '1.25rem' }}>
+                    <li>Go to the <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer" style={{ color: '#3b82f6', textDecoration: 'none' }}>Discord Developer Portal</a>.</li>
+                    <li>Log in and click <strong>New Application</strong>. Name it something like "Job Tracker Bot".</li>
+                    <li>In the left menu, go to the <strong>Bot</strong> tab.</li>
+                  </ol>
+                </div>
+                <button onClick={() => (window as any).electronAPI?.openExternal?.('https://discord.com/developers/applications')} style={{ marginTop: '0.75rem', padding: '0.5rem 0.9rem', backgroundColor: '#5865F2', border: 'none', borderRadius: '6px', color: '#fff', fontWeight: 600, cursor: 'pointer' }}>Open Discord Developer Portal</button>
+              </div>
+
+              <div style={{ padding: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '10px' }}>
+                <div style={{ color: '#e5e7eb', fontWeight: 600, marginBottom: '0.35rem' }}>Step 2: Get your Bot Token</div>
+                <div style={{ color: '#9ca3af', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                  <ol style={{ margin: 0, paddingLeft: '1.25rem' }}>
+                    <li>Still on the <strong>Bot</strong> tab, locate the <strong>Token</strong> section.</li>
+                    <li>Click <strong>Reset Token</strong> (or Copy if visible).</li>
+                    <li><strong>Important:</strong> Copy this long string immediately. Paste it in the <strong>Bot Token</strong> field behind this modal.</li>
+                  </ol>
+                </div>
+              </div>
+
+              <div style={{ padding: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '10px' }}>
+                <div style={{ color: '#e5e7eb', fontWeight: 600, marginBottom: '0.35rem' }}>Step 3: Add the Bot to your Server</div>
+                <div style={{ color: '#9ca3af', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                  <ol style={{ margin: 0, paddingLeft: '1.25rem' }}>
+                    <li>In the left menu, go to <strong>OAuth2</strong> → <strong>URL Generator</strong>.</li>
+                    <li>Under <strong>Scopes</strong>, check the box for <strong>bot</strong>. (A new <em>Bot Permissions</em> section will appear below).</li>
+                    <li>Under <strong>Bot Permissions</strong>, select <strong>Send Messages</strong>, <strong>View Channels / Read Messages</strong>, and <strong>Embed Links</strong>.</li>
+                    <li>Copy the Generated URL at the bottom and open it in a new browser tab.</li>
+                    <li>Select the server you want the bot to join and authorize it.</li>
+                  </ol>
+                </div>
+              </div>
+
+              <div style={{ padding: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '10px' }}>
+                <div style={{ color: '#e5e7eb', fontWeight: 600, marginBottom: '0.35rem' }}>Step 4: Get your Channel or User ID</div>
+                <div style={{ color: '#9ca3af', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                  <ol style={{ margin: 0, paddingLeft: '1.25rem', marginBottom: '0.5rem' }}>
+                    <li>Open Discord. Go to User Settings (gear icon) → <strong>Advanced</strong>. Turn on <strong>Developer Mode</strong>.</li>
+                    <li>To send to a <strong>Server Channel</strong>: Right-click the channel name in your server list and choose <strong>Copy Channel ID</strong>.</li>
+                    <li>To send a <strong>Direct Message</strong>: Right-click your own profile (or a friend's) and choose <strong>Copy User ID</strong>. Note: For DMs, you must share a server with the bot or it won't be able to message you.</li>
+                  </ol>
+                  Paste this ID into the <strong>Channel / Recipient ID</strong> field.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem', flexShrink: 0 }}>
+              <button onClick={() => setShowDiscordWizard(false)} style={{ padding: '0.6rem 1rem', backgroundColor: '#3b82f6', border: 'none', borderRadius: '6px', color: '#fff', fontWeight: 600, cursor: 'pointer' }}>Got it</button>
             </div>
           </div>
         </div>

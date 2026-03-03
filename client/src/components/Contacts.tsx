@@ -170,6 +170,7 @@ export default function Contacts() {
   const [sortOrder, setSortOrder] = useSessionStorage<'asc' | 'desc'>('contacts_sortOrder', 'desc');
   const [loading, setLoading] = useState(false);
   const [expandedDraftId, setExpandedDraftId] = useState<number | null>(null);
+  const [notFound, setNotFound] = useState(false);
 
 
 
@@ -206,6 +207,7 @@ export default function Contacts() {
   async function loadContactDetail() {
     setLoading(true);
     setSelectedContact(null);
+    setNotFound(false);
     setEditing(false); // Always start in view mode when navigating to a contact
     try {
       // Load main contact details first
@@ -226,6 +228,7 @@ export default function Contacts() {
     } catch (error) {
       console.error('Error loading contact:', error);
       setSelectedContact(null);
+      setNotFound(true);
     } finally {
       setLoading(false);
     }
@@ -418,7 +421,7 @@ export default function Contacts() {
       );
     }
 
-    if (!selectedContact && !loading) {
+    if (notFound && !loading) {
       return (
         <div style={{ textAlign: 'center', padding: '4rem 2rem', backgroundColor: '#1a1d24', borderRadius: '8px', border: '1px solid #2d3139' }}>
           <h2 style={{ color: '#ef4444', marginBottom: '1rem' }}>Contact Not Found</h2>
@@ -478,7 +481,23 @@ export default function Contacts() {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '2rem' }}>
                 <div>
-                  <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', color: '#fbbf24' }}>{selectedContact.name}</h1>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                    <h1 style={{ fontSize: '2rem', margin: 0, color: '#fbbf24' }}>{selectedContact.name}</h1>
+                    {!!selectedContact.is_prospective && (
+                      <span style={{
+                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                        color: '#60a5fa',
+                        fontSize: '0.75rem',
+                        fontWeight: 'bold',
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        textTransform: 'uppercase'
+                      }}>
+                        Prospective
+                      </span>
+                    )}
+                  </div>
                   {selectedContact.role && (
                     <p style={{ fontSize: '1.25rem', color: '#9ca3af', marginBottom: '0.5rem' }}>{selectedContact.role}</p>
                   )}

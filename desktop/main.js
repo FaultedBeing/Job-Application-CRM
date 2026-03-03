@@ -16,6 +16,8 @@ let isManualUpdateCheck = false;
 let themedDialogCounter = 0;
 let reminderPollInterval = null;
 let enableLocalUpdates = false;
+let discordPollInterval = null;
+
 const gmailTokenPath = path.join(app.getPath('userData'), 'gmail-oauth.json');
 
 function base64UrlEncode(buffer) {
@@ -1255,6 +1257,27 @@ function stopReminderPolling() {
   }
 }
 
+function pollDiscordSummary() {
+  console.log('[Discord Polling] Window active, triggering summary check...');
+  apiRequest('POST', '/discord/send-summary', {}).catch((err) => {
+    console.error('[Discord Polling] Error calling send-summary:', err.message || err);
+  });
+}
+
+function startDiscordPolling() {
+  if (discordPollInterval) return;
+  pollDiscordSummary();
+  // Poll every 30 minutes
+  discordPollInterval = setInterval(pollDiscordSummary, 30 * 60 * 1000);
+}
+
+function stopDiscordPolling() {
+  if (discordPollInterval) {
+    clearInterval(discordPollInterval);
+    discordPollInterval = null;
+  }
+}
+
 function updateSplashStatus(message, progress) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const script = `
@@ -1400,6 +1423,7 @@ function createWindow() {
       updateSplashStatus('Loading interface...', 90);
       if (mainWindow) {
         startReminderPolling();
+        startDiscordPolling();
         const target = pendingDeepLink ? null : 'http://localhost:3000';
         if (target) {
           mainWindow.loadURL(target);
@@ -1736,6 +1760,21 @@ ipcMain.on('quit-and-install', () => {
   }, 1000);
 });
 
+ipcMain.on('set-auto-launch', (_event, enabled) => {
+  if (process.platform === 'win32' && app.isPackaged) {
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: enabled,
+        path: process.execPath,
+        args: ['--hidden']
+      });
+      console.log(`[Auto-launch] ${enabled ? 'Enabled' : 'Disabled'}`);
+    } catch (e) {
+      console.warn('Failed to update login item settings:', e);
+    }
+  }
+});
+
 // Check for updates periodically
 // ...
 
@@ -1814,6 +1853,7 @@ app.on('window-all-closed', () => {
     serverProcess.kill();
   }
   stopReminderPolling();
+  stopDiscordPolling();
 
   if (process.platform !== 'darwin') {
     app.quit();
@@ -1826,4 +1866,5 @@ app.on('before-quit', () => {
     serverProcess.kill();
   }
   stopReminderPolling();
+  stopDiscordPolling();
 });

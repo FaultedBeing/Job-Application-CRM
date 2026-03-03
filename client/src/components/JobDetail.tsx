@@ -509,7 +509,7 @@ export default function JobDetail() {
   return (
     <div>
       <button
-        onClick={() => navigate('/applications')}
+        onClick={() => navigate(-1)}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -553,7 +553,25 @@ export default function JobDetail() {
                 <h1 style={{ fontSize: '2rem', marginBottom: '0.35rem', color: '#fbbf24' }}>{job.title}</h1>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ fontSize: '1.1rem', color: '#9ca3af', margin: 0 }}>{job.company_name}</p>
+                    {job.company_id ? (
+                      <span
+                        onClick={() => navigate(`/companies/${job.company_id}`)}
+                        style={{
+                          fontSize: '1.1rem',
+                          color: '#3b82f6',
+                          margin: 0,
+                          cursor: 'pointer',
+                          display: 'inline-block'
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                        onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                        title={`View ${job.company_name} details`}
+                      >
+                        {job.company_name}
+                      </span>
+                    ) : (
+                      <p style={{ fontSize: '1.1rem', color: '#9ca3af', margin: 0 }}>{job.company_name}</p>
+                    )}
                     {job.location && (
                       <p style={{ fontSize: '0.9rem', color: '#6b7280', marginTop: '0.1rem', marginBottom: 0 }}>{job.location}</p>
                     )}
@@ -1368,7 +1386,7 @@ function DocumentUpload({ onUpload }: { onUpload: (file: File, type: string) => 
 }
 
 function AddContactModal({ jobId, onClose, onSave }: { jobId: number; onClose: () => void; onSave: (data: any) => void }) {
-  const [formData, setFormData] = useState({ name: '', role: '', email: '', phone: '', linkedin_url: '', notes: '' });
+  const [formData, setFormData] = useState({ name: '', role: '', email: '', phone: '', linkedin_url: '', notes: '', is_prospective: 0 });
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -1386,6 +1404,18 @@ function AddContactModal({ jobId, onClose, onSave }: { jobId: number; onClose: (
           <input type="tel" placeholder="Phone" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }} />
           <input type="url" placeholder="LinkedIn URL" value={formData.linkedin_url} onChange={(e) => setFormData({ ...formData, linkedin_url: e.target.value })} style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }} />
           <textarea placeholder="Notes" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', minHeight: '80px' }} />
+          <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <input
+              type="checkbox"
+              id="is_prospective_job_add"
+              checked={!!formData.is_prospective}
+              onChange={(e) => setFormData({ ...formData, is_prospective: e.target.checked ? 1 : 0 })}
+              style={{ width: '1.1rem', height: '1.1rem', cursor: 'pointer' }}
+            />
+            <label htmlFor="is_prospective_job_add" style={{ color: '#e5e7eb', cursor: 'pointer', fontSize: '0.9rem' }}>
+              Prospective Contact
+            </label>
+          </div>
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
             <button type="button" onClick={onClose} style={{ padding: '0.75rem 1.5rem', backgroundColor: 'transparent', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', cursor: 'pointer' }}>Cancel</button>
             <button type="submit" style={{ padding: '0.75rem 1.5rem', backgroundColor: '#fbbf24', border: 'none', borderRadius: '6px', color: '#0f1115', fontWeight: 'bold', cursor: 'pointer' }}>Add</button>

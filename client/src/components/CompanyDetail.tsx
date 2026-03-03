@@ -20,6 +20,7 @@ interface Company {
   no_posted_jobs?: boolean;
   no_appropriate_jobs?: boolean;
   financial_stability_warning?: boolean;
+  excitement_rating?: number;
   __follow_up?: { due_at: string; message?: string; notify_desktop?: boolean; notify_email?: boolean } | null;
 }
 
@@ -342,7 +343,7 @@ export default function CompanyDetail() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <button
-          onClick={() => navigate('/companies')}
+          onClick={() => navigate(-1)}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -476,6 +477,22 @@ export default function CompanyDetail() {
                     border: '1px solid rgba(249, 115, 22, 0.3)'
                   }}>
                     No Appropriate Jobs
+                  </span>
+                )}
+                {company.excitement_rating !== undefined && company.excitement_rating > 0 && (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                    padding: '0.25rem 0.75rem',
+                    borderRadius: '999px',
+                    backgroundColor: 'rgba(251, 191, 36, 0.15)',
+                    color: '#fbbf24',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    border: '1px solid rgba(251, 191, 36, 0.3)'
+                  }} title="Excitement Rating">
+                    ★ {company.excitement_rating}
                   </span>
                 )}
               </div>
@@ -1072,7 +1089,8 @@ function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSa
     company_size: company.company_size || '',
     dark_logo_bg: company.dark_logo_bg ?? false,
     logo_url: company.logo_url,
-    financial_stability_warning: !!company.financial_stability_warning
+    financial_stability_warning: !!company.financial_stability_warning,
+    excitement_rating: company.excitement_rating || 0
   });
   const [industryOptions, setIndustryOptions] = useState<string[]>([]);
   const [isDraggingLogo, setIsDraggingLogo] = useState(false);
@@ -1127,7 +1145,8 @@ function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSa
       employee_count: undefined,
       dark_logo_bg: formData.dark_logo_bg,
       logo_url: formData.logo_url,
-      financial_stability_warning: formData.financial_stability_warning
+      financial_stability_warning: formData.financial_stability_warning,
+      excitement_rating: formData.excitement_rating
     });
   }
 
@@ -1336,6 +1355,21 @@ function EditCompanyForm({ company, onSave, onCancel }: { company: Company; onSa
           <option value="1001–5000">1001–5000</option>
           <option value="5001–10000">5001–10000</option>
           <option value="10001+">10001+</option>
+        </select>
+      </div>
+      <div style={{ marginBottom: '1rem' }}>
+        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#e5e7eb' }}>Excitement Rating</label>
+        <select
+          value={formData.excitement_rating}
+          onChange={(e) => setFormData({ ...formData, excitement_rating: parseInt(e.target.value) || 0 })}
+          style={{ width: '100%', padding: '0.75rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }}
+        >
+          <option value="0">Unrated</option>
+          <option value="1">1 - Low</option>
+          <option value="2">2 - Fair</option>
+          <option value="3">3 - Good</option>
+          <option value="4">4 - High</option>
+          <option value="5">5 - Must Have</option>
         </select>
       </div>
       <div style={{ marginBottom: '1rem' }}>
@@ -1582,7 +1616,8 @@ function AddJobModal({ companyName, onClose, onSave }: { companyName: string; on
 }
 
 function AddContactModal({ onClose, onSave }: { onClose: () => void; onSave: (data: any) => void }) {
-  const [formData, setFormData] = useState({ name: '', role: '', email: '', phone: '', linkedin_url: '', notes: '' });
+  const [formData, setFormData] = useState({ name: '', role: '', email: '', phone: '', linkedin_url: '', notes: '', is_prospective: 0 });
+
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -1600,6 +1635,18 @@ function AddContactModal({ onClose, onSave }: { onClose: () => void; onSave: (da
           <input type="tel" placeholder="Phone" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }} />
           <input type="url" placeholder="LinkedIn URL" value={formData.linkedin_url} onChange={(e) => setFormData({ ...formData, linkedin_url: e.target.value })} style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb' }} />
           <textarea placeholder="Notes" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem', backgroundColor: '#0f1115', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', minHeight: '80px' }} />
+          <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <input
+              type="checkbox"
+              id="is_prospective_company_add"
+              checked={!!formData.is_prospective}
+              onChange={(e) => setFormData({ ...formData, is_prospective: e.target.checked ? 1 : 0 })}
+              style={{ width: '1.1rem', height: '1.1rem', cursor: 'pointer' }}
+            />
+            <label htmlFor="is_prospective_company_add" style={{ color: '#e5e7eb', cursor: 'pointer', fontSize: '0.9rem' }}>
+              Prospective Contact
+            </label>
+          </div>
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
             <button type="button" onClick={onClose} style={{ padding: '0.75rem 1.5rem', backgroundColor: 'transparent', border: '1px solid #2d3139', borderRadius: '6px', color: '#e5e7eb', cursor: 'pointer' }}>Cancel</button>
             <button type="submit" style={{ padding: '0.75rem 1.5rem', backgroundColor: '#fbbf24', border: 'none', borderRadius: '6px', color: '#0f1115', fontWeight: 'bold', cursor: 'pointer' }}>Add</button>

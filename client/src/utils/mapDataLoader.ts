@@ -3,6 +3,11 @@
  * Supports background preloading and caching.
  */
 
+import usCities from '../data/us-cities.json';
+import usGazetteer from '../data/us-gazetteer-places.json';
+import usTopology from 'us-atlas/states-10m.json';
+import worldTopology from 'world-atlas/countries-50m.json';
+
 interface MapDataCache {
     [key: string]: any;
 }
@@ -18,28 +23,31 @@ async function loadFile(key: string, importer: () => Promise<any>) {
 }
 
 export const MapDataLoader = {
-    getUSCities: () => loadFile('us_cities', () => import('../data/us-cities.json')),
-    getUSGazetteer: () => loadFile('us_gazetteer', () => import('../data/us-gazetteer-places.json')),
+    // These are now static to avoid build warnings and support the "seamless" UI requirement
+    getUSCities: async () => usCities,
+    getUSGazetteer: async () => usGazetteer,
+    getUSTopology: async () => usTopology,
+    getWorldTopology: async () => worldTopology,
+
+    // Regional data remains dynamic to keep the main bundle size from exploding further
     getAUCities: () => loadFile('au_cities', () => import('../data/au-cities.json')),
     getCACities: () => loadFile('ca_cities', () => import('../data/ca-cities.json')),
     getNZCities: () => loadFile('nz_cities', () => import('../data/nz-cities.json')),
     getEUCities: () => loadFile('eu_cities', () => import('../data/eu-cities.json')),
-    getUSTopology: () => loadFile('us_topology', () => import('us-atlas/states-10m.json')),
-    getWorldTopology: () => loadFile('world_topology', () => import('world-atlas/countries-50m.json')),
 
-    // Preload everything silently
+    // Preload regional data silently
     preloadAll: async () => {
         try {
-            // We load them sequentially or in small batches to avoid pegging the CPU/Network too hard at once
-            await MapDataLoader.getUSCities();
-            await MapDataLoader.getUSGazetteer();
-            await MapDataLoader.getAUCities();
-            await MapDataLoader.getCACities();
-            await MapDataLoader.getNZCities();
-            await MapDataLoader.getEUCities();
-            console.log('Map data preloading complete');
+            // Static data (US, World) is already bundled/preloaded by the main app/LocationMap
+            await Promise.all([
+                MapDataLoader.getAUCities(),
+                MapDataLoader.getCACities(),
+                MapDataLoader.getNZCities(),
+                MapDataLoader.getEUCities()
+            ]);
+            console.log('Regional map data preloading complete');
         } catch (err) {
-            console.error('Map data preloading failed:', err);
+            console.error('Regional map data preloading failed:', err);
         }
     }
 };

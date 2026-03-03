@@ -9,6 +9,7 @@ import Contacts from './components/Contacts';
 import Documents from './components/Documents';
 import Settings from './components/Settings';
 import NotificationSettings from './components/NotificationSettings';
+import InterviewPrep from './components/InterviewPrep';
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/contacts/:id" element={<Contacts />} />
           <Route path="/documents" element={<Documents />} />
+          <Route path="/interview-prep" element={<InterviewPrep />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/notifications-settings" element={<NotificationSettings />} />
         </Routes>

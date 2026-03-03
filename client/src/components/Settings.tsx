@@ -17,6 +17,7 @@ export default function Settings() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
+  const [autoLaunch, setAutoLaunch] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; confirmLabel?: string; confirmColor?: string; onConfirm: () => void } | null>(null);
 
   useEffect(() => {
@@ -37,7 +38,7 @@ export default function Settings() {
       saveSettings();
     }, 1000);
     return () => clearTimeout(timer);
-  }, [username, statuses, allowPrerelease, enableLocalUpdates, showJobMap, initialLoaded]);
+  }, [username, statuses, allowPrerelease, enableLocalUpdates, showJobMap, autoLaunch, initialLoaded]);
 
   function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
     setToast({ message, type });
@@ -57,8 +58,6 @@ export default function Settings() {
       setStatuses(statusStr.split(','));
       const rawIndustryStr: string | null | undefined = res.data.industries;
 
-      // Always reset industries to fix any broken comma-separated entries
-      // This ensures proper pipe-delimited format
       const defaultIndustries = [
         'Launch Vehicles',
         'Satellite Manufacturing',
@@ -77,24 +76,19 @@ export default function Settings() {
         'Other Space-Related'
       ];
 
-      // Seed defaults if settings are missing (first run / older DB)
       if (rawIndustryStr === undefined || rawIndustryStr === null) {
         setIndustries(defaultIndustries);
-        // Save defaults to database with proper pipe delimiter
         await api.post('/settings', {
           industries: defaultIndustries.join('|')
         });
       } else if (!rawIndustryStr.trim()) {
-        // Respect an intentionally empty list (e.g. user clicked "Clear All")
         setIndustries([]);
       } else {
         const industryStr = rawIndustryStr;
-        // Check if using old comma format
         const hasCommas = industryStr.includes(',') && !industryStr.includes('|');
         const industryList = hasCommas ? [] : (industryStr.includes('|') ? industryStr.split('|').filter((i: string) => i.trim()) : [industryStr].filter((i: string) => i.trim()));
 
         if (industryList.length === 0 || hasCommas) {
-          // Reset to defaults if using old comma format or empty list
           setIndustries(defaultIndustries);
           await api.post('/settings', {
             industries: defaultIndustries.join('|')
@@ -104,24 +98,19 @@ export default function Settings() {
         }
       }
 
-      // Load allow_prerelease setting
-      const allowPrereleaseStr = res.data.allow_prerelease || 'false';
-      setAllowPrerelease(allowPrereleaseStr === 'true');
-
-      // Load enable_local_updates setting
-      const enableLocalUpdatesStr = res.data.enable_local_updates || 'false';
-      setEnableLocalUpdates(enableLocalUpdatesStr === 'true');
-
-      // Load job location map toggle (default ON if not set)
+      setAllowPrerelease(res.data.allow_prerelease === 'true');
+      setEnableLocalUpdates(res.data.enable_local_updates === 'true');
       const showJobMapStr = res.data.show_job_map;
       setShowJobMap(showJobMapStr === undefined || showJobMapStr === null ? true : showJobMapStr === 'true');
+
+      // Load Auto-launch setting
+      setAutoLaunch(res.data.auto_launch === 'true');
 
     } catch (error) {
       console.error('Error loading settings:', error);
     }
   }
 
-  // Update Status state for settings page
   const [updateInfo, setUpdateInfo] = useState<any>(null);
   const [downloaded, setDownloaded] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
@@ -129,22 +118,22 @@ export default function Settings() {
 
   useEffect(() => {
     if (window.electronAPI) {
-      window.electronAPI.onUpdateAvailable((info) => {
+      window.electronAPI.onUpdateAvailable((info: any) => {
         setUpdateInfo(info);
         setUpdateError(null);
       });
 
-      window.electronAPI.onUpdateDownloaded((info) => {
+      window.electronAPI.onUpdateDownloaded((info: any) => {
         setUpdateInfo(info);
         setDownloaded(true);
         setDownloadProgress(null);
       });
 
-      window.electronAPI.onDownloadProgress((progress) => {
+      window.electronAPI.onDownloadProgress((progress: any) => {
         setDownloadProgress(progress.percent);
       });
 
-      window.electronAPI.onUpdateError((err) => {
+      window.electronAPI.onUpdateError((err: string) => {
         setUpdateError(err);
         setDownloadProgress(null);
       });
@@ -159,8 +148,13 @@ export default function Settings() {
         industries: industries.join('|'),
         allow_prerelease: allowPrerelease ? 'true' : 'false',
         enable_local_updates: enableLocalUpdates ? 'true' : 'false',
-        show_job_map: showJobMap ? 'true' : 'false'
+        show_job_map: showJobMap ? 'true' : 'false',
+        auto_launch: autoLaunch ? 'true' : 'false'
       });
+
+      if (window.electronAPI?.setAutoLaunch) {
+        window.electronAPI.setAutoLaunch(autoLaunch);
+      }
       showToast('Settings saved!', 'success');
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -286,8 +280,9 @@ export default function Settings() {
     }
   }
 
+
   return (
-    <div>
+    <div style={{ paddingBottom: '2rem' }}>
       <h1 style={{ fontSize: '2rem', marginBottom: '2rem', color: '#fbbf24' }}>Settings</h1>
 
       {/* Username */}
@@ -413,6 +408,23 @@ export default function Settings() {
         </label>
         <p style={{ color: '#9ca3af', fontSize: '0.85rem', marginTop: '0.5rem' }}>
           When enabled, job detail pages will show a small US map with a pin for the job’s location.
+        </p>
+      </section>
+
+      {/* Startup & Launch */}
+      <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>Startup & Launch</h2>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#e5e7eb', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={autoLaunch}
+            onChange={(e) => setAutoLaunch(e.target.checked)}
+            style={{ accentColor: '#fbbf24', width: 18, height: 18, borderRadius: 4 }}
+          />
+          <span>Launch application automatically on computer startup</span>
+        </label>
+        <p style={{ color: '#9ca3af', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+          When enabled, the Job Tracker will start automatically and minimize to the system tray when you log in.
         </p>
       </section>
 
@@ -647,7 +659,6 @@ export default function Settings() {
             onClick={() => {
               localStorage.setItem('debug_console_visible', 'true');
               window.dispatchEvent(new Event('storage'));
-              // Show notification to confirm
               alert("Debug console restored. It will appear at the bottom of the screen.");
             }}
             style={{
@@ -666,7 +677,7 @@ export default function Settings() {
         )}
       </section>
 
-      {/* Debug Settings (Hidden by default, unlocked by "pizzapie") */}
+      {/* Debug Settings */}
       {showDebugSettings && (
         <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem', border: '1px dashed #fbbf24' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -696,18 +707,18 @@ export default function Settings() {
             <span>Enable Local Update Check</span>
           </label>
           <p style={{ color: '#9ca3af', fontSize: '0.85rem', marginTop: '0.5rem' }}>
-            When enabled, the app will check for update files (latest.yml) in the application folder before checking GitHub. Useful for testing build packages locally.
+            When enabled, the app will check for update files (latest.yml) in the application folder before checking GitHub.
           </p>
         </section>
       )}
 
-      {/* Notifications & Email — link to dedicated page */}
+      {/* Notifications & Email */}
       <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h2 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', color: '#e5e7eb' }}>Notifications &amp; Email</h2>
             <p style={{ color: '#9ca3af', fontSize: '0.875rem', margin: 0 }}>
-              Configure email reminders (Gmail or custom SMTP/AWS), desktop notification preferences, and summary thresholds.
+              Configure email reminders, desktop notifications, and bot settings.
             </p>
           </div>
           <Link
@@ -727,24 +738,6 @@ export default function Settings() {
           </Link>
         </div>
       </section>
-
-      {/* Actions (Manual trigger if needed) */}
-      <div style={{ display: 'none', gap: '1rem', marginBottom: '2rem' }}>
-        <button
-          onClick={saveSettings}
-          style={{
-            padding: '0.75rem 1.5rem',
-            backgroundColor: '#fbbf24',
-            border: 'none',
-            borderRadius: '6px',
-            color: '#0f1115',
-            fontWeight: 'bold',
-            cursor: 'pointer'
-          }}
-        >
-          Save Settings
-        </button>
-      </div>
 
       {/* Data Management */}
       <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>
@@ -858,6 +851,7 @@ export default function Settings() {
           </button>
         </div>
       )}
+
       <ConfirmDialog
         open={pendingConfirm !== null}
         title={pendingConfirm?.title || ''}
@@ -867,7 +861,6 @@ export default function Settings() {
         onConfirm={() => pendingConfirm?.onConfirm()}
         onCancel={() => setPendingConfirm(null)}
       />
-
     </div>
   );
 }

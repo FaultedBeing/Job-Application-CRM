@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Briefcase, Building2, Users, FileText, Settings, Bell } from 'lucide-react';
+import { Home, Briefcase, Building2, Users, FileText, Settings, Bell, FileQuestion } from 'lucide-react';
 
 export default function Sidebar() {
   const location = useLocation();
@@ -10,6 +10,7 @@ export default function Sidebar() {
     { path: '/companies', icon: Building2, label: 'Companies' },
     { path: '/contacts', icon: Users, label: 'Contacts' },
     { path: '/documents', icon: FileText, label: 'Documents' },
+    { path: '/interview-prep', icon: FileQuestion, label: 'Interview Prep' },
     { path: '/settings', icon: Settings, label: 'Settings' },
     { path: '/notifications-settings', icon: Bell, label: 'Notifications' }
   ];

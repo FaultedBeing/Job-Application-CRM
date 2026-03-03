@@ -389,9 +389,28 @@ export default function Dashboard() {
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
-                    gap: '0.35rem'
+                    gap: '0.35rem',
+                    position: 'relative'
                   }}
                 >
+                  {!!contact.is_prospective && (
+                    <span style={{
+                      position: 'absolute',
+                      top: '6px',
+                      right: '6px',
+                      backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                      color: '#60a5fa',
+                      fontSize: '0.6rem',
+                      fontWeight: 'bold',
+                      padding: '2px 4px',
+                      borderRadius: '4px',
+                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                      textTransform: 'uppercase',
+                      lineHeight: 1
+                    }}>
+                      Prospective
+                    </span>
+                  )}
                   {contact.company_logo_url && (
                     <div
                       style={{
@@ -420,9 +439,6 @@ export default function Dashboard() {
                   )}
                   <p style={{ color: '#e5e7eb', fontSize: '0.9rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                     {contact.name}
-                    {!!contact.is_prospective && (
-                      <span style={{ width: '6px', height: '6px', backgroundColor: '#3b82f6', borderRadius: '50%' }} title="Prospective" />
-                    )}
                   </p>
                   {contact.company_name && (
                     <p style={{ color: '#9ca3af', fontSize: '0.75rem', margin: 0 }}>{contact.company_name}</p>

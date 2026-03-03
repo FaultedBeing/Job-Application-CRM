@@ -152,7 +152,8 @@ export class Database {
         logo_url TEXT,
         employee_count INTEGER,
         company_size TEXT,
-        financial_stability_warning INTEGER DEFAULT 0
+        financial_stability_warning INTEGER DEFAULT 0,
+        excitement_rating INTEGER DEFAULT 0
       )
     `);
 
@@ -164,6 +165,7 @@ export class Database {
     await this.run(`ALTER TABLE companies ADD COLUMN no_posted_jobs INTEGER DEFAULT 0`);
     await this.run(`ALTER TABLE companies ADD COLUMN no_appropriate_jobs INTEGER DEFAULT 0`);
     await this.run(`ALTER TABLE companies ADD COLUMN financial_stability_warning INTEGER DEFAULT 0`);
+    await this.run(`ALTER TABLE companies ADD COLUMN excitement_rating INTEGER DEFAULT 0`);
 
     await this.run(`
       CREATE TABLE IF NOT EXISTS jobs (
@@ -334,10 +336,33 @@ export class Database {
       console.error('Documents migration check failed (non-fatal):', err);
     }
 
+    // Interview Questions
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS interview_questions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        question TEXT NOT NULL,
+        answer TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     await this.run(`
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT
+      )
+    `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS activity_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL, -- 'create' | 'update' | 'delete'
+        entity_type TEXT NOT NULL, -- 'job' | 'contact' | 'interaction' | 'company' | 'note'
+        entity_id INTEGER,
+        description TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -346,6 +371,13 @@ export class Database {
     if (!username) {
       await this.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['username', 'User']);
     }
+
+    // Default Discord settings
+    await this.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['discord_enabled', 'false']);
+    await this.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['discord_bot_token', '']);
+    await this.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['discord_recipient_id', '']);
+    await this.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['discord_last_summary_at', '']);
+    await this.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['auto_launch_enabled', 'true']);
 
     const statuses = await this.get('SELECT value FROM settings WHERE key = ?', ['statuses']);
     if (!statuses) {
@@ -461,26 +493,38 @@ export class Database {
 
   async createCompany(data: any) {
     await this.run(
-      'INSERT INTO companies (name, website, industry, notes, location, dark_logo_bg, no_posted_jobs, no_appropriate_jobs, financial_stability_warning, logo_url, employee_count, company_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.financial_stability_warning ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null]
+      'INSERT INTO companies (name, website, industry, notes, location, dark_logo_bg, no_posted_jobs, no_appropriate_jobs, financial_stability_warning, logo_url, employee_count, company_size, excitement_rating) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.financial_stability_warning ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null, data.excitement_rating || 0]
     );
-    return await this.get('SELECT * FROM companies WHERE name = ?', [data.name]);
+    const res = await this.get('SELECT * FROM companies WHERE name = ?', [data.name]);
+    if (res) {
+      await this.logActivity('create', 'company', res.id, `Created company "${res.name}"`);
+    }
+    return res;
   }
 
   async updateCompany(id: number, data: any) {
     await this.run(
-      'UPDATE companies SET name = ?, website = ?, industry = ?, notes = ?, location = ?, dark_logo_bg = ?, no_posted_jobs = ?, no_appropriate_jobs = ?, financial_stability_warning = ?, logo_url = ?, employee_count = ?, company_size = ? WHERE id = ?',
-      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.financial_stability_warning ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null, id]
+      'UPDATE companies SET name = ?, website = ?, industry = ?, notes = ?, location = ?, dark_logo_bg = ?, no_posted_jobs = ?, no_appropriate_jobs = ?, financial_stability_warning = ?, logo_url = ?, employee_count = ?, company_size = ?, excitement_rating = ? WHERE id = ?',
+      [data.name, data.website || null, data.industry || null, data.notes || null, data.location || null, data.dark_logo_bg ? 1 : 0, data.no_posted_jobs ? 1 : 0, data.no_appropriate_jobs ? 1 : 0, data.financial_stability_warning ? 1 : 0, data.logo_url || null, data.employee_count || null, data.company_size || null, data.excitement_rating || 0, id]
     );
-    return await this.getCompany(id);
+    const updated = await this.getCompany(id);
+    if (updated) {
+      await this.logActivity('update', 'company', id, `Updated company "${updated.name}"`);
+    }
+    return updated;
   }
 
   async deleteCompany(id: number) {
+    const company = await this.getCompany(id);
     // Nullify foreign keys instead of cascading
     await this.run('UPDATE jobs SET company_id = NULL WHERE company_id = ?', [id]);
     await this.run('UPDATE contacts SET company_id = NULL WHERE company_id = ?', [id]);
     await this.run('UPDATE interactions SET company_id = NULL WHERE company_id = ?', [id]);
     await this.run('DELETE FROM companies WHERE id = ?', [id]);
+    if (company) {
+      await this.logActivity('delete', 'company', id, `Deleted company "${company.name}"`);
+    }
   }
 
   async findOrCreateCompany(name: string, website?: string, logoUrl?: string) {
@@ -576,6 +620,10 @@ export class Database {
       await this.run('UPDATE companies SET last_interaction = CURRENT_TIMESTAMP WHERE id = ?', [companyId]);
     }
 
+    if (job) {
+      await this.logActivity('create', 'job', job.id, `Created job "${job.title}"${data.company_name ? ` at ${data.company_name}` : ''}`);
+    }
+
     return job;
   }
 
@@ -625,14 +673,23 @@ export class Database {
       await this.run('UPDATE companies SET last_interaction = CURRENT_TIMESTAMP WHERE id = ?', [companyId]);
     }
 
-    return await this.getJob(id);
+    const updated = await this.getJob(id);
+    if (updated) {
+      await this.logActivity('update', 'job', id, `Updated job "${updated.title}"`);
+    }
+
+    return updated;
   }
 
   async deleteJob(id: number) {
+    const job = await this.getJob(id);
     await this.run('UPDATE contacts SET job_id = NULL WHERE job_id = ?', [id]);
     await this.run('UPDATE interactions SET job_id = NULL WHERE job_id = ?', [id]);
     await this.run('DELETE FROM documents WHERE job_id = ?', [id]);
     await this.run('DELETE FROM jobs WHERE id = ?', [id]);
+    if (job) {
+      await this.logActivity('delete', 'job', id, `Deleted job "${job.title}"`);
+    }
   }
 
   // Contacts
@@ -714,6 +771,11 @@ export class Database {
 
     const finalContact = await this.get('SELECT * FROM contacts WHERE id = ?', [contact.id]);
     await this.syncContactReminder(finalContact);
+
+    if (finalContact) {
+      await this.logActivity('create', 'contact', finalContact.id, `Added contact "${finalContact.name}"`);
+    }
+
     return finalContact;
   }
 
@@ -740,6 +802,9 @@ export class Database {
     );
     const updated = await this.get('SELECT * FROM contacts WHERE id = ?', [id]);
     await this.syncContactReminder(updated);
+    if (updated) {
+      await this.logActivity('update', 'contact', id, `Updated contact "${updated.name}"`);
+    }
     return updated;
   }
 
@@ -778,9 +843,13 @@ export class Database {
   }
 
   async deleteContact(id: number) {
+    const contact = await this.getContact(id);
     await this.run('UPDATE interactions SET contact_id = NULL WHERE contact_id = ?', [id]);
     await this.deleteReminderByEntity('contact', id, 'next_check_in');
     await this.run('DELETE FROM contacts WHERE id = ?', [id]);
+    if (contact) {
+      await this.logActivity('delete', 'contact', id, `Deleted contact "${contact.name}"`);
+    }
   }
 
   // Interactions
@@ -825,9 +894,13 @@ export class Database {
   }
 
   async deleteInteraction(id: number) {
+    const interaction = await this.getInteraction(id);
     await this.run('DELETE FROM notifications WHERE entity_type = ? AND entity_id = ?', ['interaction', id]);
     await this.deleteReminderByEntity('interaction', id, 'follow_up');
     await this.run('DELETE FROM interactions WHERE id = ?', [id]);
+    if (interaction) {
+      await this.logActivity('delete', 'interaction', id, `Deleted interaction with ${interaction.contact_name || 'unknown'}`);
+    }
   }
 
   async createInteraction(data: any) {
@@ -877,6 +950,10 @@ export class Database {
     }
     if (data.contact_id) {
       await this.run('UPDATE contacts SET last_interaction = CURRENT_TIMESTAMP WHERE id = ?', [data.contact_id]);
+    }
+
+    if (interaction) {
+      await this.logActivity('create', 'interaction', interaction.id, `Logged ${data.type || 'interaction'} with ${data.contact_name || 'a contact'}`);
     }
 
     return interaction;
@@ -969,7 +1046,9 @@ export class Database {
       notify_desktop: opts?.notify_desktop ?? true,
       notify_email: opts?.notify_email ?? false
     });
-    return await this.get('SELECT * FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ? ORDER BY id DESC LIMIT 1', ['company', companyId, 'manual']);
+    const rem = await this.get('SELECT * FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ? ORDER BY id DESC LIMIT 1', ['company', companyId, 'manual']);
+    if (rem) await this.logActivity('create', 'reminder', rem.id, `Set a reminder for a company: "${message}"`);
+    return rem;
   }
 
   async getCompanyReminders(companyId: number) {
@@ -997,7 +1076,9 @@ export class Database {
       contact_id: opts?.contact_id
     });
 
-    return await this.get('SELECT * FROM reminders WHERE rowid = last_insert_rowid()');
+    const rem = await this.get('SELECT * FROM reminders WHERE rowid = last_insert_rowid()');
+    if (rem) await this.logActivity('create', 'reminder', rem.id, `Set a reminder for a job: "${message}"`);
+    return rem;
   }
 
   async getJobReminders(jobId: number) {
@@ -1034,7 +1115,9 @@ export class Database {
       notify_email: opts?.notify_email ?? false,
       contact_id: opts?.contact_id || contactId
     });
-    return await this.get('SELECT * FROM reminders WHERE rowid = last_insert_rowid()');
+    const rem = await this.get('SELECT * FROM reminders WHERE rowid = last_insert_rowid()');
+    if (rem) await this.logActivity('create', 'reminder', rem.id, `Set a reminder for a contact: "${message}"`);
+    return rem;
   }
 
   async getDueReminders(nowIso: string) {
@@ -1052,7 +1135,11 @@ export class Database {
   }
 
   async deleteReminder(id: number) {
+    const rem = await this.get('SELECT * FROM reminders WHERE id = ?', [id]);
     await this.run('DELETE FROM reminders WHERE id = ?', [id]);
+    if (rem) {
+      await this.logActivity('delete', 'reminder', id, `Deleted reminder: "${rem.message}"`);
+    }
   }
 
   // Email Drafts
@@ -1251,7 +1338,9 @@ export class Database {
        VALUES (?, ?, ?, ?)`,
       [data.job_id || null, data.filename, data.path, data.type || 'Other']
     );
-    return await this.get('SELECT * FROM documents ORDER BY id DESC LIMIT 1');
+    const doc = await this.get('SELECT * FROM documents ORDER BY id DESC LIMIT 1');
+    await this.logActivity('create', 'document', doc.id, `Added a ${data.type || 'Other'} document: "${data.filename}"`);
+    return doc;
   }
 
   async updateDocument(id: number, data: any) {
@@ -1259,7 +1348,9 @@ export class Database {
       'UPDATE documents SET filename = ?, type = ? WHERE id = ?',
       [data.filename, data.type || 'Other', id]
     );
-    return await this.get('SELECT * FROM documents WHERE id = ?', [id]);
+    const doc = await this.get('SELECT * FROM documents WHERE id = ?', [id]);
+    await this.logActivity('update', 'document', id, `Updated document: "${data.filename}"`);
+    return doc;
   }
 
   async deleteDocument(id: number) {
@@ -1271,8 +1362,30 @@ export class Database {
       } catch (err) {
         console.error('Error deleting file:', err);
       }
+      await this.run('DELETE FROM documents WHERE id = ?', [id]);
+      await this.logActivity('delete', 'document', id, `Deleted document: "${doc.filename}"`);
+    } else {
+      await this.run('DELETE FROM documents WHERE id = ?', [id]);
     }
-    await this.run('DELETE FROM documents WHERE id = ?', [id]);
+  }
+
+  // --- Activity Logging ---
+  async logActivity(type: 'create' | 'update' | 'delete', entityType: string, entityId: number | null, description: string) {
+    try {
+      await this.run(
+        'INSERT INTO activity_log (type, entity_type, entity_id, description) VALUES (?, ?, ?, ?)',
+        [type, entityType, entityId, description]
+      );
+    } catch (err) {
+      console.error('Error logging activity:', err);
+    }
+  }
+
+  async getRecentActivity(hours: number = 24) {
+    return await this.all(
+      'SELECT * FROM activity_log WHERE timestamp >= datetime("now", ? || " hours") ORDER BY timestamp DESC',
+      [`-${hours}`]
+    );
   }
 
   // Settings
@@ -1331,5 +1444,44 @@ export class Database {
         else resolve();
       });
     });
+  }
+
+  // Interview Questions
+  async getInterviewQuestions() {
+    return await this.all('SELECT * FROM interview_questions ORDER BY created_at ASC');
+  }
+
+  async createInterviewQuestion(data: any) {
+    if (!data.type || !data.question) {
+      throw new Error('Type and question are required');
+    }
+    await this.run(
+      'INSERT INTO interview_questions (type, question, answer) VALUES (?, ?, ?)',
+      [data.type, data.question, data.answer || null]
+    );
+    const question = await this.get('SELECT * FROM interview_questions ORDER BY id DESC LIMIT 1');
+    await this.logActivity('create', 'interview_question', question.id, `Added interview question: "${data.question}"`);
+    return question;
+  }
+
+  async updateInterviewQuestion(id: number, data: any) {
+    if (!data.type || !data.question) {
+      throw new Error('Type and question are required');
+    }
+    await this.run(
+      'UPDATE interview_questions SET type = ?, question = ?, answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [data.type, data.question, data.answer || null, id]
+    );
+    const question = await this.get('SELECT * FROM interview_questions WHERE id = ?', [id]);
+    await this.logActivity('update', 'interview_question', id, `Updated interview question: "${data.question}"`);
+    return question;
+  }
+
+  async deleteInterviewQuestion(id: number) {
+    const question = await this.get('SELECT * FROM interview_questions WHERE id = ?', [id]);
+    await this.run('DELETE FROM interview_questions WHERE id = ?', [id]);
+    if (question) {
+      await this.logActivity('delete', 'interview_question', id, `Deleted interview question: "${question.question}"`);
+    }
   }
 }
