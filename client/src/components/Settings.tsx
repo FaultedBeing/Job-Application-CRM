@@ -104,7 +104,8 @@ export default function Settings() {
       setShowJobMap(showJobMapStr === undefined || showJobMapStr === null ? true : showJobMapStr === 'true');
 
       // Load Auto-launch setting
-      setAutoLaunch(res.data.auto_launch === 'true');
+      const autoLaunchStr = res.data.auto_launch;
+      setAutoLaunch(autoLaunchStr === undefined ? true : autoLaunchStr === 'true');
 
     } catch (error) {
       console.error('Error loading settings:', error);

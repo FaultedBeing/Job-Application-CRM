@@ -377,7 +377,7 @@ export class Database {
     await this.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['discord_bot_token', '']);
     await this.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['discord_recipient_id', '']);
     await this.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['discord_last_summary_at', '']);
-    await this.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['auto_launch_enabled', 'true']);
+    await this.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', ['auto_launch', 'true']);
 
     const statuses = await this.get('SELECT value FROM settings WHERE key = ?', ['statuses']);
     if (!statuses) {

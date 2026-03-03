@@ -1822,8 +1822,9 @@ app.whenReady().then(() => {
   // Remove the menu bar (File, Edit, View, Window, Help)
   Menu.setApplicationMenu(null);
 
-  // On Windows, register app to start on login (hidden to tray)
-  if (process.platform === 'win32' && app.isPackaged) {
+  // On Windows, register app to start on login (hidden to tray) ONLY on first boot
+  const welcomeFlagPath = path.join(app.getPath('userData'), '.welcome-shown');
+  if (!fs.existsSync(welcomeFlagPath) && process.platform === 'win32' && app.isPackaged) {
     try {
       app.setLoginItemSettings({
         openAtLogin: true,
