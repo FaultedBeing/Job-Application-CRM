@@ -25,7 +25,8 @@
     "publish": {
       "provider": "github",
       "owner": "FaultedBeing",
-      "repo": "Job-Application-CRM"
+      "repo": "Job-Application-CRM",
+      "channel": "cloud"
     },
     "win": {
       "target": [

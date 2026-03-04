@@ -12,6 +12,7 @@ import NotificationSettings from './components/NotificationSettings';
 import InterviewPrep from './components/InterviewPrep';
 import CloudSetupWizard from './components/CloudSetupWizard';
 import { useState, useEffect } from 'react';
+import api from './api';
 
 function App() {
   const [cloudConfigured, setCloudConfigured] = useState<boolean | null>(null);
@@ -19,10 +20,19 @@ function App() {
   useEffect(() => {
     const checkCloud = async () => {
       try {
-        const res = await fetch('/api/sync/status');
-        const status = await res.json();
+        const res = await api.get('/sync/status');
+        const status = res.data;
         // If the sync engine is initialized and has config, we're good
         setCloudConfigured(status.hasConfig);
+
+        if (status.hasConfig) {
+          try {
+            const userId = localStorage.getItem('cloud_user_id') || 'admin';
+            await api.post('/sync/auto-migrate-check', { userId });
+          } catch (mErr) {
+            console.error('Auto-migrate check failed', mErr);
+          }
+        }
       } catch (err) {
         console.error('Failed to check cloud status:', err);
         setCloudConfigured(false);

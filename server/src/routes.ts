@@ -30,7 +30,7 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
       res.json({
         isSyncing: syncService.getStatus().isSyncing,
         lastSync: settings.last_cloud_sync || null,
-        hasConfig: !!(settings.supabase_url && settings.supabase_key)
+        hasConfig: !!(settings.supabase_url && settings.supabase_key) || settings.cloud_mode === 'joiner'
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -57,6 +57,38 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
       await syncService.sync();
       res.json({ success: true });
     } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/sync/auto-migrate-check', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) return res.status(400).json({ error: 'User ID is required' });
+
+      // Check if user has connected Supabase
+      const status = syncService.getStatus();
+      if (!status.hasConfig) {
+        return res.json({ migrated: false, reason: 'No cloud config' });
+      }
+
+      // Check remote entries
+      // The best way is to use syncService's supabase instance but it's private.
+      // We can query local companies assigned to null (local only).
+      const unassignedCompanies = await db.all('SELECT id FROM companies WHERE user_id IS NULL OR user_id = ""');
+
+      // If there are unassigned companies, and they are essentially entirely locally generated, let's just migrate them.
+      // This solves the problem of "upload everything that is in the local server to supabase".
+      if (unassignedCompanies.length > 0) {
+        console.log(`Auto-migrating ${unassignedCompanies.length} local companies to user ${userId}`);
+        const result = await db.migrateLocalData(userId);
+        syncService.triggerImmediateSync();
+        return res.json({ migrated: true, result });
+      }
+
+      res.json({ migrated: false, reason: 'No local unassigned data' });
+    } catch (error: any) {
+      console.error('Auto-migrate error:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -769,6 +801,7 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
       const paths = [
         path.join(__dirname, '..', '..', 'client', 'public', fileName),
         path.join(__dirname, '..', '..', 'client', 'dist', fileName),
+        path.join(__dirname, '..', 'client-dist', fileName),
         path.join(process.cwd(), 'client', 'public', fileName),
         path.join(process.cwd(), 'client', 'dist', fileName),
         path.join(process.cwd(), 'resources', 'client-dist', fileName)

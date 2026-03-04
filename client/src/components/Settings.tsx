@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
-import { Download, Trash2, Cloud, RefreshCw } from 'lucide-react';
+import { Download, Trash2, Cloud } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ConfirmDialog from './ConfirmDialog';
 
@@ -18,11 +18,13 @@ export default function Settings() {
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
   const [autoLaunch, setAutoLaunch] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<any>(null);
   const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; confirmLabel?: string; confirmColor?: string; onConfirm: () => void } | null>(null);
 
   useEffect(() => {
     loadSettings().then(() => setInitialLoaded(true));
     setShowDebugSettings(localStorage.getItem('debug_mode_enabled') === 'true');
+    fetchSyncStatus();
     // Fetch dynamic app version from main process
     if (window.electronAPI?.getAppVersion) {
       window.electronAPI.getAppVersion().then(setAppVersion).catch(console.error);
@@ -47,6 +49,15 @@ export default function Settings() {
       window.setTimeout(() => {
         setToast((t) => (t?.message === message ? null : t));
       }, 2500);
+    }
+  }
+
+  async function fetchSyncStatus() {
+    try {
+      const res = await api.get('/sync/status');
+      setSyncStatus(res.data);
+    } catch (err) {
+      console.error('Failed to fetch sync status:', err);
     }
   }
 
@@ -740,58 +751,108 @@ export default function Settings() {
         </div>
       </section>
 
-      {/* Cloud Migration */}
-      <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem', border: '1px solid #3b82f633' }}>
+      {/* Cloud Configuration */}
+      <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem', border: '1px solid #fbbf2433' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-          <div style={{ padding: '0.5rem', backgroundColor: '#3b82f61a', borderRadius: '8px', color: '#3b82f6' }}>
+          <div style={{ padding: '0.5rem', backgroundColor: '#fbbf241a', borderRadius: '8px', color: '#fbbf24' }}>
             <Cloud size={24} />
           </div>
-          <h2 style={{ fontSize: '1.25rem', color: '#e5e7eb', margin: 0 }}>Cloud Migration</h2>
+          <h2 style={{ fontSize: '1.25rem', color: '#e5e7eb', margin: 0 }}>Cloud Settings &amp; Configuration</h2>
         </div>
-        <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
-          If you have existing data from the non-cloud version, you can migrate it to your currently connected cloud account. This will assign all unowned local records to your user ID and sync them to Supabase.
-        </p>
-        <button
-          onClick={() => {
-            setPendingConfirm({
-              title: 'Migrate Local Data',
-              message: 'This will move all current local records to your cloud account. This action is safe but should only be done once per account. Proceed?',
-              confirmLabel: 'Migrate Now',
-              confirmColor: '#3b82f6',
-              onConfirm: async () => {
-                setPendingConfirm(null);
-                try {
-                  showToast('Starting migration...', 'info');
-                  // We'll use the user info from settings or a default
-                  // For now, the server handles it if we send the right request
-                  // Let's assume we have a way to know the current userId or just use 'admin' as fallback
-                  const userId = localStorage.getItem('cloud_user_id') || 'admin';
-                  await api.post('/api/sync/migrate', { userId });
-                  showToast('Migration complete! Syncing in progress.', 'success');
-                } catch (error) {
-                  console.error('Migration error:', error);
-                  showToast('Migration failed. Check console for details.', 'error');
-                }
+        <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#0f1115', borderRadius: '6px', border: '1px solid #2d3139' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <span style={{ color: '#9ca3af', fontSize: '0.9rem' }}>Current Session Connection:</span>
+            {syncStatus?.hasConfig ? (
+              <span style={{ color: '#10b981', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }}></div>
+                Online ({syncStatus.isSyncing ? 'Syncing...' : 'Synced'})
+              </span>
+            ) : (
+              <span style={{ color: '#ef4444', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }}></div>
+                Offline / Not Configured
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ color: '#9ca3af', fontSize: '0.9rem' }}>User Identity:</span>
+            <span style={{ color: '#e5e7eb', fontFamily: 'monospace' }}>{localStorage.getItem('cloud_user_id') || 'None'}</span>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
+          <button
+            onClick={async () => {
+              try {
+                showToast('Preparing download...', 'info');
+                const res = await api.get('/download/lambda', { responseType: 'blob' });
+                const blob = new Blob([res.data], { type: 'application/zip' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'job-crm-lambda-blueprint.zip';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+                showToast('Blueprint downloaded successfully!', 'success');
+              } catch (err: any) {
+                console.error('Failed to download lambda blueprint:', err);
+                showToast('Failed to download blueprint: ' + (err.response?.data?.error || err.message), 'error');
               }
-            });
-          }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            padding: '0.75rem 1.5rem',
-            backgroundColor: '#3b82f6',
-            border: 'none',
-            borderRadius: '6px',
-            color: '#fff',
-            fontWeight: 'bold',
-            cursor: 'pointer'
-          }}
-        >
-          <RefreshCw size={20} />
-          Migrate Local Data to Cloud
-        </button>
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.6rem 1.25rem',
+              backgroundColor: '#374151',
+              border: '1px solid #4b5563',
+              borderRadius: '6px',
+              color: '#e5e7eb',
+              fontWeight: 600,
+              cursor: 'pointer',
+              textDecoration: 'none'
+            }}
+          >
+            <Download size={18} />
+            Download AWS Blueprint
+          </button>
+
+          <button
+            onClick={() => {
+              setPendingConfirm({
+                title: 'Sign Out / Reset Cloud',
+                message: 'Are you sure you want to sign out? This will disconnect your device from the cloud and return you to the setup wizard. Your cloud data will not be deleted.',
+                confirmLabel: 'Sign Out',
+                confirmColor: '#ef4444',
+                onConfirm: async () => {
+                  setPendingConfirm(null);
+                  localStorage.removeItem('cloud_user_id');
+                  showToast('Cloud session reset. Refreshing...', 'success');
+                  window.setTimeout(() => window.location.reload(), 1000);
+                }
+              });
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.6rem 1.25rem',
+              backgroundColor: 'transparent',
+              border: '1px solid #ef4444',
+              borderRadius: '6px',
+              color: '#ef4444',
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            Sign Out / Reset Session
+          </button>
+        </div>
       </section>
+
+
 
       {/* Data Management */}
       <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem' }}>

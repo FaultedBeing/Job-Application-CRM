@@ -686,20 +686,24 @@ function createTray() {
   }
 }
 
-function waitForServer(url, timeoutMs = 15000) {
+function waitForServer(url, timeoutMs = 30000) {
   const start = Date.now();
+  const logPath = path.join(app.getPath('userData'), 'server-log.txt');
 
   return new Promise((resolve, reject) => {
     function check() {
-      const req = http.get(url, (res) => {
+      const targetUrl = url.replace('localhost', '127.0.0.1');
+      const req = http.get(targetUrl, (res) => {
         res.destroy();
         resolve(true);
       });
-      req.on('error', () => {
+      req.on('error', (err) => {
         if (Date.now() - start > timeoutMs) {
-          reject(new Error('Server did not start in time'));
+          const msg = `Server did not start in time. Last error: ${err.message} at ${targetUrl}`;
+          fs.appendFileSync(logPath, `\n[ERROR] waitForServer: ${msg}\n`);
+          reject(new Error(msg));
         } else {
-          setTimeout(check, 500);
+          setTimeout(check, 1000); // 1s interval is easier on logs
         }
       });
     }
@@ -713,7 +717,7 @@ function apiRequest(method, apiPath, body) {
     const req = http.request(
       {
         hostname: 'localhost',
-        port: 3001,
+        port: 3033,
         path: `/api${apiPath.startsWith('/') ? apiPath : `/${apiPath}`}`,
         method,
         headers: data
@@ -787,7 +791,7 @@ async function deliverDesktopNotifications(settings) {
         if (mainWindow) {
           mainWindow.show();
           mainWindow.focus();
-          mainWindow.loadURL(`http://localhost:3001/?notifications=1`).catch(() => { });
+          mainWindow.loadURL(`http://localhost:3002/?notifications=1`).catch(() => { });
         }
       });
       notif.show();
@@ -812,9 +816,9 @@ async function deliverDesktopNotifications(settings) {
           mainWindow.show();
           mainWindow.focus();
           if (n.link_path) {
-            mainWindow.loadURL(`http://localhost:3000${n.link_path}`).catch(() => { });
+            mainWindow.loadURL(`http://localhost:3002${n.link_path}`).catch(() => { });
           } else {
-            mainWindow.loadURL(`http://localhost:3000/?notifications=1`).catch(() => { });
+            mainWindow.loadURL(`http://localhost:3002/?notifications=1`).catch(() => { });
           }
         }
       });
@@ -1014,6 +1018,14 @@ async function hydrateNotificationLabels(pending) {
 // Notifications are now handled via the Cloud Lambda.
 // Local app only handles Desktop popups.
 
+async function pollNotifications() {
+  try {
+    const settings = await getSettings();
+    await deliverDesktopNotifications(settings);
+  } catch (_e) {
+    // Ignore transient errors
+  }
+}
 
 function startPolling() {
   if (reminderPollInterval) return;
@@ -1168,12 +1180,12 @@ function createWindow() {
   startServer();
 
   // Once server responds, load frontend
-  waitForServer('http://localhost:3001/health')
+  waitForServer('http://localhost:3033/health')
     .then(() => {
       updateSplashStatus('Loading interface...', 90);
       if (mainWindow) {
         startPolling();
-        const target = pendingDeepLink ? null : 'http://localhost:3001';
+        const target = pendingDeepLink ? null : 'http://localhost:3033';
         if (target) {
           mainWindow.loadURL(target);
         }
@@ -1185,9 +1197,22 @@ function createWindow() {
     })
     .catch((err) => {
       console.error('Error waiting for server:', err);
+      const logPath = path.join(app.getPath('userData'), 'server-log.txt');
+      let logSnippet = '';
+      try {
+        logSnippet = fs.readFileSync(logPath, 'utf8').split('\n').slice(-10).join('<br>');
+      } catch (e) { }
+
       if (mainWindow) {
         mainWindow.loadURL('data:text/html;charset=utf-8,' +
-          encodeURIComponent('<html><body style=\"background:#0f1115;color:#fca5a5;display:flex;align-items:center;justify-content:center;font-family:system-ui\">Failed to start server. Please restart the app.</body></html>'));
+          encodeURIComponent(`<html><body style=\"background:#0f1115;color:#fca5a5;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui;text-align:center;padding:20px\">
+            <div style="font-size:1.2rem;margin-bottom:10px">Failed to start server</div>
+            <div style="color:#9ca3af;font-size:0.9rem;margin-bottom:20px">${err.message}</div>
+            <div style="background:#111827;padding:10px;border-radius:4px;font-family:monospace;font-size:0.8rem;text-align:left;width:100%;max-width:500px;overflow:auto;max-height:200px">
+              ${logSnippet}
+            </div>
+            <button onclick="window.location.reload()" style="margin-top:20px;padding:10px 20px;background:#374151;color:white;border:none;border-radius:4px;cursor:pointer">Retry</button>
+          </body></html>`));
       }
     });
 
@@ -1226,7 +1251,7 @@ function startServer() {
   const env = {
     ...process.env,
     NODE_ENV: isDev ? 'development' : 'production',
-    PORT: '3001',
+    PORT: '3033',
     RESOURCES_PATH: isDev ? path.join(__dirname, '..') : process.resourcesPath,
     FRONTEND_PATH: frontendPath,
     APPDATA: app.getPath('userData')
@@ -1256,11 +1281,21 @@ function startServer() {
     env: env,
     cwd: path.dirname(serverPath),
     windowsHide: true, // Hide console window on Windows
-    // In production, use 'pipe' to hide console; in dev, use 'inherit' to see logs
-    stdio: app.isPackaged ? ['ignore', 'ignore', 'ignore'] : 'inherit'
+    // In production, capture logs to a file for troubleshooting
+    stdio: app.isPackaged ? ['ignore', 'pipe', 'pipe'] : 'inherit'
   };
 
   serverProcess = spawn(nodeExecutable, [serverPath], spawnOptions);
+
+  if (app.isPackaged && serverProcess.stdout && serverProcess.stderr) {
+    const logPath = path.join(app.getPath('userData'), 'server-log.txt');
+    const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+    const timestamp = new Date().toISOString();
+    logStream.write(`\n--- Server Start: ${timestamp} ---\n`);
+    serverProcess.stdout.pipe(logStream);
+    serverProcess.stderr.pipe(logStream);
+    console.log(`Server logs redirected to: ${logPath}`);
+  }
 
   serverProcess.on('error', (error) => {
     console.error('Error starting server:', error);
@@ -1285,9 +1320,11 @@ function setupAutoUpdater() {
     autoUpdater.setFeedURL({
       provider: 'github',
       owner: 'FaultedBeing',
-      repo: 'Job-Application-CRM'
+      repo: 'Job-Application-CRM',
+      channel: 'cloud'
     });
-    console.log('[Auto-updater] Feed URL configured: FaultedBeing/Job-Application-CRM');
+    autoUpdater.channel = 'cloud';
+    console.log('[Auto-updater] Feed URL configured: FaultedBeing/Job-Application-CRM (channel: cloud)');
   } catch (error) {
     console.error('[Auto-updater] Error configuring feed URL:', error);
     return; // Can't do anything without a feed URL
@@ -1407,8 +1444,10 @@ function checkForUpdates(manual = false) {
     autoUpdater.setFeedURL({
       provider: 'github',
       owner: 'FaultedBeing',
-      repo: 'Job-Application-CRM'
+      repo: 'Job-Application-CRM',
+      channel: 'cloud'
     });
+    autoUpdater.channel = 'cloud';
   } catch (err) {
     console.error('[Auto-updater] Error setting GitHub feed:', err);
   }

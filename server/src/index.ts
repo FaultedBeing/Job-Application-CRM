@@ -8,8 +8,27 @@ import { setupRoutes } from './routes';
 import multer from 'multer';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// Diagnostic logging
+console.log(`--- Server Process Started at ${new Date().toISOString()} ---`);
+console.log(`NODE_ENV: ${NODE_ENV}`);
+console.log(`PORT: ${PORT}`);
+
+// Global error handlers
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
+// Simple health check for Electron wrapper (moved early for faster detection)
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok' });
+});
 
 // Ensure mime.lookup exists for static file serving (some mime versions remove it)
 // Use require so we patch the same CommonJS export that Express/send uses.
@@ -54,9 +73,9 @@ if (NODE_ENV === 'production') {
   const rawAppData = process.env.APPDATA || path.join(process.env.HOME || '', '.job-tracker');
   let appDataPath = rawAppData;
 
-  if (NODE_ENV === 'production' && !rawAppData.endsWith('Job Application Tracker')) {
+  if (NODE_ENV === 'production' && !rawAppData.endsWith('job-tracker-desktop')) {
     // If we are in Roaming base or in a different app's folder, point to the original one
-    appDataPath = path.join(path.dirname(rawAppData), 'Job Application Tracker');
+    appDataPath = path.join(path.dirname(rawAppData), 'job-tracker-desktop');
   }
   const resourcesPath = process.env.RESOURCES_PATH || path.join(__dirname, '..');
 
@@ -73,15 +92,20 @@ if (NODE_ENV === 'production') {
   frontendPath = path.join(__dirname, '..', '..', 'client', 'dist');
 }
 
+// Ensure frontend path evaluates fully.
+console.log('Frontend serving from:', frontendPath);
+
 // Ensure uploads directory exists
 fs.ensureDirSync(uploadsPath);
 
 // Initialize database
 const db = new Database(dbPath);
-db.initialize().then(() => {
+console.log('Initializing database...');
+db.initialize().then(async () => {
+  console.log('Database initialization complete.');
   // Initialize sync service
   const syncService = new SyncService(db);
-  syncService.initialize();
+  await syncService.initialize();
 
   // Configure multer for file uploads
   const storage = multer.diskStorage({
@@ -95,7 +119,21 @@ db.initialize().then(() => {
   });
   const upload = multer({ storage });
 
-  setupRoutes(app, db, upload, uploadsPath, syncService);
+  // Middleware (must be before routes)
+  app.use(cors());
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+
+  // Intercept X-User-Id
+  app.use((req, res, next) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (userId) {
+      db.setUserId(userId);
+    } else {
+      db.setUserId(null); // default/local
+    }
+    next();
+  });
 
   // Background reminder delivery check (every minute)
   setInterval(async () => {
@@ -103,43 +141,37 @@ db.initialize().then(() => {
       const now = new Date().toISOString();
       // Sync due reminders to notifications if not already done
       await db.syncDueRemindersToNotifications(now);
-
-      // 1. Deliver pending Desktop notifications
-      // (Handled by frontend polling)
-      await db.syncDueRemindersToNotifications(now);
     } catch (err) {
       console.error('Background Delivery Error:', err);
     }
   }, 60000);
 
-  // Middleware
-  app.use(cors());
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
-
-
   // Serve uploaded files
   app.use('/uploads', express.static(uploadsPath));
 
-  // Simple health check for Electron wrapper to know when server is ready
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok' });
-  });
+  setupRoutes(app, db, upload, uploadsPath, syncService);
 
-  // Serve frontend when a built client exists
+  // We explicitly resolve the pre-evaluated global frontendPath here instead of 
+  // relying on relative cwd evaluations from fs module after async jumps
   if (fs.existsSync(frontendPath)) {
+    console.log('Serving frontend strictly from:', frontendPath);
     app.use(express.static(frontendPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(frontendPath, 'index.html'));
     });
+  } else {
+    console.error(`FATAL: Client directory not found at absolute path: ${frontendPath}`);
   }
-});
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Database: ${dbPath}`);
-  console.log(`Uploads: ${uploadsPath}`);
+  // Start server
+  app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Database: ${dbPath}`);
+    console.log(`Uploads: ${uploadsPath}`);
+  });
+}).catch((err) => {
+  console.error('FATAL: Initialization failed:', err);
+  process.exit(1);
 });
 
 export default app;

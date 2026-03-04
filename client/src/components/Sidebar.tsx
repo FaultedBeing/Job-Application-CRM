@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Home, Briefcase, Building2, Users, FileText, Settings, Bell, FileQuestion, Cloud, Wifi, WifiOff } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import api from '../api';
 
 export default function Sidebar() {
   const location = useLocation();
@@ -9,9 +10,8 @@ export default function Sidebar() {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await fetch('/api/sync/status');
-        const data = await res.json();
-        setSyncStatus(data);
+        const res = await api.get('/sync/status');
+        setSyncStatus(res.data);
       } catch (err) {
         console.error(err);
       }

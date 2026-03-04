@@ -32,7 +32,7 @@ export class SyncService {
         };
     }
 
-    startSyncLoop(ms: number = 30000) { // Default 30 seconds
+    startSyncLoop(ms: number = 60000) { // Default 60 seconds
         if (this.syncInterval) clearInterval(this.syncInterval);
         this.syncInterval = setInterval(() => this.sync(), ms);
         // Run once immediately
@@ -76,10 +76,24 @@ export class SyncService {
         for (const item of queue) {
             try {
                 const { table_name, record_id, action, data } = item;
-                const payload = JSON.parse(data);
+                let payload: any = {};
+                try {
+                    payload = data ? JSON.parse(data) : {};
+                } catch (e) {
+                    console.warn(`SyncService: Invalid JSON in sync_queue item ${item.id}`);
+                }
+
                 const userId = await this.db.getUserId();
 
                 if (action === 'INSERT' || action === 'UPDATE') {
+                    if (!data || Object.keys(payload).length === 0) {
+                        payload = await this.db.get(`SELECT * FROM ${table_name} WHERE id = ?`, [record_id]);
+                        if (!payload) {
+                            // Record deleted locally before sync ran
+                            await this.db.run('UPDATE sync_queue SET synced_at = CURRENT_TIMESTAMP WHERE id = ?', [item.id], true);
+                            continue;
+                        }
+                    }
                     // Add user_id and record_id to payload if not present
                     const record = { ...payload, id: record_id, user_id: userId };
 
@@ -100,7 +114,7 @@ export class SyncService {
                 // Mark as synced
                 await this.db.run('UPDATE sync_queue SET synced_at = CURRENT_TIMESTAMP WHERE id = ?', [item.id], true);
             } catch (err) {
-                console.error(`SyncService: Failed to push item ${item.id}:`, err);
+                console.error(`SyncService: Failed to push item ${item.id}: `, err);
                 // We'll retry in the next loop
             }
         }
@@ -125,7 +139,7 @@ export class SyncService {
                 .gt('updated_at', lastSync);
 
             if (error) {
-                console.error(`SyncService: Error pulling from ${table}:`, error);
+                console.error(`SyncService: Error pulling from ${table}: `, error);
                 continue;
             }
 
@@ -144,7 +158,7 @@ export class SyncService {
                     await this.db.run('COMMIT', [], true);
                 } catch (txErr) {
                     await this.db.run('ROLLBACK', [], true);
-                    console.error(`SyncService: Transaction failed for ${table}:`, txErr);
+                    console.error(`SyncService: Transaction failed for ${table}: `, txErr);
                 }
             }
         }
@@ -160,28 +174,28 @@ export class SyncService {
         // For now, we'll build a query dynamically.
         const keys = Object.keys(record);
         const placeholders = keys.map(() => '?').join(', ');
-        const updates = keys.map(k => `${k} = EXCLUDED.${k}`).join(', ');
+        const updates = keys.map(k => `${k} = EXCLUDED.${k} `).join(', ');
 
         // This depends on the table having a primary key named 'id'
         const sql = `
       INSERT INTO ${table} (${keys.join(', ')})
-      VALUES (${placeholders})
+                        VALUES(${placeholders})
       ON CONFLICT(id) DO UPDATE SET ${updates}
-    `;
+                        `;
 
         // Note: 'PLACEHOLDER' logic for ON CONFLICT depends on SQLite version or specific syntax.
         // For SQLite 3.24+, it supports standard upsert syntax.
 
         // Simpler fallback: check if exists, then update or insert.
-        const existing = await this.db.get(`SELECT id FROM ${table} WHERE id = ?`, [record.id]);
+        const existing = await this.db.get(`SELECT id FROM ${table} WHERE id = ? `, [record.id]);
         if (existing) {
             const setClause = keys.map(k => `${k} = ?`).join(', ');
             const params = keys.map(k => record[k]).concat(record.id);
-            await this.db.run(`UPDATE ${table} SET ${setClause} WHERE id = ?`, params, true);
+            await this.db.run(`UPDATE ${table} SET ${setClause} WHERE id = ? `, params, true);
         } else {
             const placeholdersArr = keys.map(() => '?').join(', ');
             const params = keys.map(k => record[k]);
-            await this.db.run(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholdersArr})`, params, true);
+            await this.db.run(`INSERT INTO ${table} (${keys.join(', ')}) VALUES(${placeholdersArr})`, params, true);
         }
     }
 }

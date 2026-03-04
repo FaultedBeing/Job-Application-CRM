@@ -186,37 +186,42 @@ export class Database {
   async migrateLocalData(userId: string) {
     const tables = [
       'companies', 'jobs', 'contacts', 'interactions', 'reminders',
-      'notifications', 'email_drafts', 'documents', 'interview_questions', 'settings'
+      'notifications', 'documents', 'interview_questions'
     ];
 
-    for (const table of tables) {
-      // 1. Log to sync_queue for all existing records that are being claimed
-      // We use 'INSERT' action because for the cloud, these are new records.
-      // We skip 'settings' for record_id and use record_key instead later.
-      if (table !== 'settings' && table !== 'notifications' && table !== 'activity_log') {
-        const records = await this.all(`SELECT id FROM ${table} WHERE user_id IS NULL`);
-        for (const rec of records) {
+    await this.run('BEGIN TRANSACTION', [], true);
+    try {
+      let totalMigrated = 0;
+      for (const table of tables) {
+        const records = await this.all(`SELECT * FROM ${table} WHERE user_id IS NULL OR user_id = ''`);
+        for (const record of records) {
           await this.run(
-            `INSERT INTO sync_queue (table_name, record_id, action, user_id) VALUES (?, ?, ?, ?)`,
-            [table, rec.id, 'INSERT', userId],
-            true // skipSync=true to avoid double queuing from the run() wrapper
+            `UPDATE ${table} SET user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            [userId, record.id],
+            true
           );
+
+          const payload = { ...record, user_id: userId };
+          await this.run(
+            `INSERT INTO sync_queue (table_name, record_id, action, data, user_id) VALUES (?, ?, ?, ?, ?)`,
+            [table, record.id, 'INSERT', JSON.stringify(payload), userId],
+            true
+          );
+          totalMigrated++;
         }
       }
-
-      // 2. Perform the update
-      await this.run(
-        `UPDATE ${table} SET user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id IS NULL`,
-        [userId],
-        true // skipSync=true
-      );
+      await this.run('COMMIT', [], true);
+      console.log(`SyncService: Migration to user ${userId} complete. Migrated ${totalMigrated} records.`);
+      return { success: true, migratedCount: totalMigrated };
+    } catch (err) {
+      await this.run('ROLLBACK', [], true);
+      console.error(`Migration error:`, err);
+      throw err;
     }
-    console.log(`AWSService: Migration to user ${userId} complete.`);
-    return { success: true };
   }
 
   async getLocalRecordCount() {
-    const tables = ['companies', 'jobs', 'contacts', 'interactions', 'reminders', 'notifications', 'email_drafts', 'documents', 'interview_questions'];
+    const tables = ['companies', 'jobs', 'contacts', 'interactions', 'reminders', 'notifications', 'documents', 'interview_questions'];
     let total = 0;
     for (const table of tables) {
       const row = await this.get(`SELECT count(*) as count FROM ${table} WHERE user_id IS NULL OR user_id = ''`);
@@ -244,6 +249,9 @@ export class Database {
   }
 
   async initialize() {
+    // Enable WAL mode for better concurrency (especially since we share the DB)
+    await this.run(`PRAGMA journal_mode = WAL`);
+
     // Create tables
     await this.run(`
       CREATE TABLE IF NOT EXISTS companies (
@@ -502,24 +510,18 @@ export class Database {
       )
     `);
 
-    await this.run(`ALTER TABLE companies ADD COLUMN user_id TEXT`);
-    await this.run(`ALTER TABLE companies ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
-    await this.run(`ALTER TABLE jobs ADD COLUMN user_id TEXT`);
-    await this.run(`ALTER TABLE jobs ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
-    await this.run(`ALTER TABLE contacts ADD COLUMN user_id TEXT`);
-    await this.run(`ALTER TABLE contacts ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
-    await this.run(`ALTER TABLE interactions ADD COLUMN user_id TEXT`);
-    await this.run(`ALTER TABLE interactions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
-    await this.run(`ALTER TABLE reminders ADD COLUMN user_id TEXT`);
-    await this.run(`ALTER TABLE reminders ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
-    await this.run(`ALTER TABLE notifications ADD COLUMN user_id TEXT`);
-    await this.run(`ALTER TABLE notifications ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
-    await this.run(`ALTER TABLE documents ADD COLUMN user_id TEXT`);
-    await this.run(`ALTER TABLE documents ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
-    await this.run(`ALTER TABLE interview_questions ADD COLUMN user_id TEXT`);
-    await this.run(`ALTER TABLE interview_questions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
-    await this.run(`ALTER TABLE settings ADD COLUMN user_id TEXT`);
-    await this.run(`ALTER TABLE settings ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    const tablesToMigrate = [
+      'companies', 'jobs', 'contacts', 'interactions',
+      'reminders', 'notifications', 'documents', 'interview_questions', 'settings'
+    ];
+
+    for (const table of tablesToMigrate) {
+      try { await this.run(`ALTER TABLE ${table} ADD COLUMN user_id TEXT`); } catch (e) { }
+      try {
+        await this.run(`ALTER TABLE ${table} ADD COLUMN updated_at DATETIME`);
+        await this.run(`UPDATE ${table} SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
+      } catch (e) { }
+    }
 
     // Initialize default settings
     const username = await this.get('SELECT value FROM settings WHERE key = ?', ['username']);
@@ -886,6 +888,7 @@ export class Database {
           WHERE ((r.entity_type = 'contact' AND r.entity_id = c.id) OR (r.contact_id = c.id))
           AND r.sent_at IS NULL AND r.due_at >= CURRENT_TIMESTAMP
         ) as nearest_reminder
+      FROM contacts c
       WHERE (c.job_id = ? 
       OR (c.company_id = ? AND c.job_id IS NULL))
       AND (c.user_id = ? OR c.user_id IS NULL)
