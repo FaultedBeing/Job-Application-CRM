@@ -1,8 +1,8 @@
-version: 0.1.1
+version: 2.2.0
 files:
-  - url: Cloud-Job-Application-Tracker-Setup-0.1.1.exe
-    sha512: IgxCcuc5bc+Awl2pryg1o5dv5yT6AZMf27AsM+KIgpcC8zkvECiMiv9++nZYEK8xb85K4lyLoulwXtbogf8PgA==
-    size: 119199822
-path: Cloud-Job-Application-Tracker-Setup-0.1.1.exe
-sha512: IgxCcuc5bc+Awl2pryg1o5dv5yT6AZMf27AsM+KIgpcC8zkvECiMiv9++nZYEK8xb85K4lyLoulwXtbogf8PgA==
-releaseDate: '2026-03-04T17:44:39.449Z'
+  - url: Cloud-Job-Application-Tracker-Setup-2.2.0.exe
+    sha512: /Uu80x6xRRV0x9SQcAwMmyyki9tLNdmm/gNVpwYECTje+f31BMj4uyc3reO85teI/5Z9e5iG+cBXzbnbKU7b3g==
+    size: 119204115
+path: Cloud-Job-Application-Tracker-Setup-2.2.0.exe
+sha512: /Uu80x6xRRV0x9SQcAwMmyyki9tLNdmm/gNVpwYECTje+f31BMj4uyc3reO85teI/5Z9e5iG+cBXzbnbKU7b3g==
+releaseDate: '2026-03-05T01:01:38.453Z'

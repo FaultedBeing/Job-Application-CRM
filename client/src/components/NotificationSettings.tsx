@@ -15,7 +15,7 @@ export default function NotificationSettings() {
   const [gmailBusy, setGmailBusy] = useState(false);
   const [gmailRecipient, setGmailRecipient] = useState('');
 
-  // SMTP / AWS
+  // SMTP / AWS (legacy desktop section)
   const [showSmtpSection, setShowSmtpSection] = useState(false);
   const [smtpEnabled, setSmtpEnabled] = useState(false);
   const [smtpHost, setSmtpHost] = useState('');
@@ -25,6 +25,17 @@ export default function NotificationSettings() {
   const [smtpFrom, setSmtpFrom] = useState('');
   const [smtpSecure, setSmtpSecure] = useState(true);
   const [smtpRecipient, setSmtpRecipient] = useState('');
+
+  // AWS SES — Serverless
+  const [showSesSection, setShowSesSection] = useState(false);
+  const [sesRegion, setSesRegion] = useState('us-east-1');
+  const [sesKeyId, setSesKeyId] = useState('');
+  const [sesSecretKey, setSesSecretKey] = useState('');
+  const [sesFrom, setSesFrom] = useState('');
+  const [sesRecipient, setSesRecipient] = useState('');
+  const [sesSmtpHost, setSesSmtpHost] = useState('');
+  const [sesEncryptionKey, setSesEncryptionKey] = useState(''); // NEVER synced to Supabase
+  const [sesTestBusy, setSesTestBusy] = useState(false);
 
   // Discord Bot
   interface DiscordRecipient {
@@ -64,7 +75,9 @@ export default function NotificationSettings() {
     gmailClientId, gmailClientSecret, gmailEnabled, gmailRecipient,
     emailProvider, smtpEnabled, smtpHost, smtpPort, smtpUser, smtpPass,
     smtpFrom, smtpSecure, smtpRecipient, desktopSummaryThreshold,
-    emailSummaryThreshold, discordEnabled, discordToken, discordRecipients, initialLoaded
+    emailSummaryThreshold, discordEnabled, discordToken, discordRecipients,
+    sesRegion, sesKeyId, sesSecretKey, sesFrom, sesRecipient, sesSmtpHost, sesEncryptionKey,
+    initialLoaded
   ]);
 
   function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
@@ -101,6 +114,16 @@ export default function NotificationSettings() {
 
       // If SMTP settings exist, open the section so the user sees them
       if (res.data.smtp_host) setShowSmtpSection(true);
+
+      // AWS SES Serverless
+      setSesRegion(res.data.ses_region || 'us-east-1');
+      setSesKeyId(res.data.ses_key_id || '');
+      setSesSecretKey(res.data.ses_secret_key || '');
+      setSesFrom(res.data.ses_from || '');
+      setSesRecipient(res.data.ses_recipient || '');
+      setSesSmtpHost(res.data.ses_smtp_host || '');
+      setSesEncryptionKey(res.data.supabase_encryption_key || '');
+      if (res.data.ses_key_id) setShowSesSection(true);
 
       // Discord
       setDiscordEnabled(res.data.discord_enabled === 'true');
@@ -169,12 +192,36 @@ export default function NotificationSettings() {
         discord_bot_token: discordToken,
         discord_recipient_id: JSON.stringify(discordRecipients),
         notification_desktop_summary_threshold: String(desktopSummaryThreshold),
-        notification_email_summary_threshold: String(emailSummaryThreshold)
+        notification_email_summary_threshold: String(emailSummaryThreshold),
+        // AWS SES Serverless
+        ses_region: sesRegion || 'us-east-1',
+        ses_key_id: sesKeyId || '',
+        ses_secret_key: sesSecretKey || '',
+        ses_from: sesFrom || '',
+        ses_recipient: sesRecipient || '',
+        ses_smtp_host: sesSmtpHost || '',
+        // NOTE: supabase_encryption_key is saved to LOCAL settings only so it is available
+        // for the syncService interceptor (which reads it to re-encrypt before pushing to Supabase).
+        // The interceptor explicitly blocks it from being synced to Supabase itself.
+        supabase_encryption_key: sesEncryptionKey || ''
       });
       showToast('Notification settings saved!', 'success');
     } catch (error) {
       console.error('Error saving notification settings:', error);
       showToast('Error saving settings', 'error');
+    }
+  }
+
+  async function handleSesTest() {
+    setSesTestBusy(true);
+    try {
+      await saveAll();
+      const res = await api.post('/ses/send-test');
+      showToast(`Test email sent to ${res.data.to}! Check your inbox.`, 'success');
+    } catch (e: any) {
+      showToast(e?.response?.data?.error || 'SES test failed', 'error');
+    } finally {
+      setSesTestBusy(false);
     }
   }
 
@@ -508,6 +555,124 @@ export default function NotificationSettings() {
                   <li>Verify the "From" email address under <strong>SES → Verified identities</strong>.</li>
                   <li>Paste the host, username, and password above. Port 587 with TLS is recommended.</li>
                 </ol>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ===== Serverless Email (AWS SES) ===== */}
+      <section style={{ backgroundColor: '#1a1d24', borderRadius: '8px', marginBottom: '2rem', overflow: 'hidden' }}>
+        <button
+          onClick={() => setShowSesSection(!showSesSection)}
+          style={{
+            width: '100%', padding: '1.25rem 1.5rem', backgroundColor: 'transparent',
+            border: 'none', color: '#e5e7eb', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: '0.75rem', textAlign: 'left'
+          }}
+        >
+          {showSesSection ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: '1.1rem', fontWeight: 600 }}>Serverless Email (AWS SES)</span>
+            <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '2px' }}>
+              <span style={{ color: '#10b981', fontSize: '0.75rem', fontWeight: 600, backgroundColor: '#10b98122', padding: '1px 8px', borderRadius: '99px' }}>WORKS WHEN PC IS OFF</span>
+              <span style={{ color: '#6b7280', fontSize: '0.8rem' }}>Reminders sent even when your computer is off via AWS Lambda</span>
+            </span>
+          </div>
+          {sesKeyId && <span style={{ color: '#10b981', fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}>✓ Configured</span>}
+        </button>
+
+        {showSesSection && (
+          <div style={{ padding: '0 1.5rem 1.5rem' }}>
+            <div style={{ borderTop: '1px solid #2d3139', paddingTop: '1rem' }}>
+
+              {/* How it works callout */}
+              <div style={{ padding: '1rem', backgroundColor: '#0f1115', borderRadius: '8px', border: '1px solid #10b98133', marginBottom: '1.5rem' }}>
+                <div style={{ color: '#10b981', fontWeight: 600, marginBottom: '0.4rem', fontSize: '0.9rem' }}>How this works</div>
+                <ol style={{ color: '#9ca3af', fontSize: '0.85rem', margin: 0, paddingLeft: '1.25rem', lineHeight: 1.7 }}>
+                  <li>Enter your AWS SES SMTP credentials below and click <strong style={{ color: '#e5e7eb' }}>Test Email</strong>.</li>
+                  <li>These settings sync to Supabase automatically.</li>
+                  <li>Deploy the included AWS Lambda (<code style={{ color: '#fbbf24' }}>lambda/ses-reminder-sender/</code>) — it reads credentials from Supabase and sends due reminders on a schedule.</li>
+                  <li>See <code style={{ color: '#fbbf24' }}>lambda/ses-reminder-sender/README.md</code> for full setup instructions.</li>
+                </ol>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', maxWidth: '640px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.35rem', color: '#e5e7eb', fontSize: '0.875rem' }}>AWS Region</label>
+                  <input type="text" value={sesRegion} onChange={e => setSesRegion(e.target.value)}
+                    placeholder="us-east-1" style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.35rem', color: '#e5e7eb', fontSize: '0.875rem' }}>Custom SMTP Host <span style={{ color: '#6b7280', fontWeight: 400 }}>(optional)</span></label>
+                  <input type="text" value={sesSmtpHost} onChange={e => setSesSmtpHost(e.target.value)}
+                    placeholder={`Auto: email-smtp.${sesRegion || 'us-east-1'}.amazonaws.com`} style={inputStyle} />
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'block', marginBottom: '0.35rem', color: '#e5e7eb', fontSize: '0.875rem' }}>SMTP Username <span style={{ color: '#6b7280', fontWeight: 400 }}>(from SES → SMTP Settings → Create Credentials)</span></label>
+                  <input type="text" value={sesKeyId} onChange={e => setSesKeyId(e.target.value)}
+                    placeholder="AKIAIOSFODNN7EXAMPLE" style={inputStyle} />
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'block', marginBottom: '0.35rem', color: '#e5e7eb', fontSize: '0.875rem' }}>SMTP Password</label>
+                  <input type="password" value={sesSecretKey} onChange={e => setSesSecretKey(e.target.value)}
+                    placeholder="SMTP password from AWS" style={inputStyle} />
+                  <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.35rem' }}>
+                    ⚠️ This is the SMTP password from <strong>SES → SMTP Settings</strong>, not your AWS secret access key.
+                  </p>
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.35rem', color: '#e5e7eb', fontSize: '0.875rem' }}>From address <span style={{ color: '#ef4444', fontWeight: 400 }}>*verified in SES</span></label>
+                  <input type="email" value={sesFrom} onChange={e => setSesFrom(e.target.value)}
+                    placeholder="you@yourdomain.com" style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.35rem', color: '#e5e7eb', fontSize: '0.875rem' }}>Send reminders to</label>
+                  <input type="email" value={sesRecipient} onChange={e => setSesRecipient(e.target.value)}
+                    placeholder="Leave blank to use From address" style={inputStyle} />
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'block', marginBottom: '0.35rem', color: '#e5e7eb', fontSize: '0.875rem' }}>
+                    Supabase Encryption Key
+                    <span style={{ marginLeft: '8px', color: '#10b981', fontSize: '0.75rem', fontWeight: 600, backgroundColor: '#10b98122', padding: '1px 8px', borderRadius: '99px' }}>SECURITY</span>
+                  </label>
+                  <input type="password" value={sesEncryptionKey} onChange={e => setSesEncryptionKey(e.target.value)}
+                    placeholder="A strong passphrase of your choice" style={inputStyle} />
+                  <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: '#1c1714', border: '1px solid #78350f44', borderRadius: '6px' }}>
+                    <p style={{ color: '#fbbf24', fontSize: '0.8rem', margin: '0 0 0.35rem', fontWeight: 600 }}>🔐 Keep this passphrase secret and in sync with Lambda</p>
+                    <ul style={{ color: '#9ca3af', fontSize: '0.78rem', margin: 0, paddingLeft: '1.25rem', lineHeight: 1.7 }}>
+                      <li>This passphrase is stored <strong style={{ color: '#e5e7eb' }}>locally only</strong> — it is <strong style={{ color: '#e5e7eb' }}>never</strong> synced to Supabase.</li>
+                      <li>Your SES SMTP password is encrypted with this key before being saved to Supabase, so Supabase only ever stores ciphertext.</li>
+                      <li>Set <strong style={{ color: '#fbbf24' }}>SETTINGS_ENCRYPTION_KEY</strong> to the <em>exact same value</em> in your AWS Lambda environment variables.</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <button
+                  onClick={handleSesTest}
+                  disabled={sesTestBusy || !sesKeyId || !sesSecretKey}
+                  style={{
+                    padding: '0.6rem 1.25rem',
+                    backgroundColor: (sesTestBusy || !sesKeyId) ? '#374151' : '#10b981',
+                    border: 'none', borderRadius: '6px', color: '#fff',
+                    fontWeight: 'bold',
+                    cursor: (sesTestBusy || !sesKeyId || !sesSecretKey) ? 'not-allowed' : 'pointer',
+                    opacity: (sesTestBusy || !sesKeyId || !sesSecretKey) ? 0.7 : 1
+                  }}
+                >
+                  {sesTestBusy ? 'Sending...' : '✉ Send Test Email'}
+                </button>
+
+                <a
+                  href="https://us-east-1.console.aws.amazon.com/ses/home#/smtp"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ padding: '0.6rem 1rem', border: '1px solid #2d3139', borderRadius: '6px', color: '#9ca3af', textDecoration: 'none', fontSize: '0.875rem', display: 'flex', alignItems: 'center' }}
+                >
+                  Open AWS SES SMTP Settings ↗
+                </a>
               </div>
             </div>
           </div>

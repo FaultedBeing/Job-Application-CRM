@@ -791,7 +791,7 @@ async function deliverDesktopNotifications(settings) {
         if (mainWindow) {
           mainWindow.show();
           mainWindow.focus();
-          mainWindow.loadURL(`http://localhost:3002/?notifications=1`).catch(() => { });
+          mainWindow.loadURL(`http://localhost:3033/?notifications=1`).catch(() => { });
         }
       });
       notif.show();
@@ -816,9 +816,9 @@ async function deliverDesktopNotifications(settings) {
           mainWindow.show();
           mainWindow.focus();
           if (n.link_path) {
-            mainWindow.loadURL(`http://localhost:3002${n.link_path}`).catch(() => { });
+            mainWindow.loadURL(`http://localhost:3033${n.link_path}`).catch(() => { });
           } else {
-            mainWindow.loadURL(`http://localhost:3002/?notifications=1`).catch(() => { });
+            mainWindow.loadURL(`http://localhost:3033/?notifications=1`).catch(() => { });
           }
         }
       });
@@ -1120,7 +1120,7 @@ function createWindow() {
             .box { text-align:center; }
             .status { margin-top: 0.5rem; font-size: 0.9rem; color: #9ca3af; }
             .bar-container {
-              margin-top: 1rem;
+              margin: 1rem auto 0;
               width: 220px;
               height: 6px;
               border-radius: 999px;
@@ -1361,6 +1361,23 @@ function setupAutoUpdater() {
   autoUpdater.on('error', (err) => {
     const errMsg = err.message || err.toString() || '';
     console.error('[Auto-updater] Error:', errMsg);
+
+    if (errMsg.includes('404') && errMsg.includes('cloud.yml')) {
+      console.log('[Auto-updater] Ignoring 404 for cloud.yml (treated as no update available).');
+      if (isManualUpdateCheck && mainWindow) {
+        showThemedDialog({
+          type: 'info',
+          title: 'No Updates Available',
+          message: 'You are running the latest version!',
+          detail: `Current version: v${app.getVersion()}`,
+          buttons: ['OK'],
+          defaultId: 0
+        });
+      }
+      isManualUpdateCheck = false;
+      return;
+    }
+
     if (mainWindow) {
       mainWindow.webContents.send('update-error', errMsg);
     }

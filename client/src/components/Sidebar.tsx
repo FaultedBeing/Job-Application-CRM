@@ -1,11 +1,24 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Briefcase, Building2, Users, FileText, Settings, Bell, FileQuestion, Cloud, Wifi, WifiOff } from 'lucide-react';
+import { Home, Briefcase, Building2, Users, FileText, Settings, Bell, FileQuestion, Cloud, Wifi, WifiOff, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import api from '../api';
+import { isElectron as _isElectron, isMobileLayout } from '../utils/env';
 
-export default function Sidebar() {
+interface SidebarProps {
+  isOpen: boolean;
+  onToggle: () => void;
+}
+
+export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
   const location = useLocation();
   const [syncStatus, setSyncStatus] = useState<any>(null);
+  const [isMobile, setIsMobile] = useState(isMobileLayout());
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(isMobileLayout());
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     const fetchStatus = async () => {
@@ -33,25 +46,36 @@ export default function Sidebar() {
   ];
 
   return (
-    <aside style={{
-      position: 'fixed',
-      left: 0,
-      top: 0,
-      width: '250px',
-      height: '100vh',
-      backgroundColor: '#1a1d24',
-      borderRight: '1px solid #2d3139',
-      padding: '1.5rem 0',
-      display: 'flex',
-      flexDirection: 'column',
-      overflowY: 'auto',
-      zIndex: 100
-    }}>
-      <div style={{ padding: '0 1.5rem', marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Cloud size={24} color="#fbbf24" />
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#fbbf24', margin: 0 }}>
-          Job CRM <span style={{ fontStyle: 'italic', fontWeight: '900' }}>Cloud</span>
-        </h1>
+    <aside
+      className={`sidebar-mobile ${isMobile ? (isOpen ? 'open' : '') : ''}`}
+      style={{
+        position: 'fixed',
+        left: 0,
+        top: 0,
+        width: '250px',
+        height: '100vh',
+        backgroundColor: '#1a1d24',
+        borderRight: '1px solid #2d3139',
+        padding: '1.5rem 0',
+        display: 'flex',
+        flexDirection: 'column',
+        overflowY: 'auto',
+        zIndex: 100,
+        boxShadow: isMobile && isOpen ? '10px 0 25px rgba(0,0,0,0.5)' : 'none'
+      }}
+    >
+      <div style={{ padding: '0 1.5rem', marginBottom: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Cloud size={24} color="#fbbf24" />
+          <h1 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#fbbf24', margin: 0 }}>
+            Job CRM <span style={{ fontStyle: 'italic', fontWeight: '900', fontSize: '1rem' }}>Cloud</span>
+          </h1>
+        </div>
+        {isMobile && (
+          <button onClick={onToggle} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer' }}>
+            <X size={24} />
+          </button>
+        )}
       </div>
       <nav style={{ flex: 1 }}>
         {navItems.map((item) => {
@@ -61,6 +85,7 @@ export default function Sidebar() {
             <Link
               key={item.path}
               to={item.path}
+              onClick={() => { if (isMobile) onToggle(); }}
               style={{
                 display: 'flex',
                 alignItems: 'center',

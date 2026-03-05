@@ -147,3 +147,18 @@ CREATE POLICY "Users can only access their own reminders" ON public.reminders FO
 CREATE POLICY "Users can only access their own notifications" ON public.notifications FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY "Users can only access their own documents" ON public.documents FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY "Users can only access their own interview questions" ON public.interview_questions FOR ALL USING (auth.uid() = user_id);
+
+-- 3. Configure Storage
+-- Note: Supabase Storage buckets cannot be created purely via SQL in some cases, 
+-- but we can set up the RLS policies for when the bucket is created via the UI or API.
+
+-- TO OPERATE DOCUMENTS:
+-- 1. Create a bucket named 'documents' in the Supabase Storage dashboard.
+-- 2. Make the bucket 'Public' (or use private with signed URLs, but 'Public' is easier for this CRM).
+
+-- RLS for Storage (Insert into storage.objects)
+-- You may need to run these if you want to restrict storage access to the owner:
+CREATE POLICY "Allow authenticated uploads" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'documents');
+CREATE POLICY "Allow owners to update their own files" ON storage.objects FOR UPDATE TO authenticated WITH CHECK (bucket_id = 'documents' AND (select auth.uid()::text) = (storage.foldername(name))[1]);
+CREATE POLICY "Allow owners to delete their own files" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'documents' AND (select auth.uid()::text) = (storage.foldername(name))[1]);
+CREATE POLICY "Allow public read access" ON storage.objects FOR SELECT TO public USING (bucket_id = 'documents');

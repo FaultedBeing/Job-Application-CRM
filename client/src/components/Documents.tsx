@@ -235,8 +235,9 @@ export default function Documents() {
                       <FileText size={18} style={{ color: typeColors[doc.type] || '#6b7280', flexShrink: 0 }} />
                       <div style={{ minWidth: 0 }}>
                         <a
-                          href={`/uploads/${getDownloadFilename(doc)}`}
+                          href={doc.path.startsWith('http') ? doc.path : `/uploads/${getDownloadFilename(doc)}`}
                           target="_blank"
+                          rel="noreferrer"
                           style={{ color: '#3b82f6', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                         >
                           {doc.filename}
@@ -359,8 +360,9 @@ export default function Documents() {
                               <FileText size={18} style={{ color: typeColors[doc.type] || '#6b7280', flexShrink: 0 }} />
                               <div style={{ minWidth: 0 }}>
                                 <a
-                                  href={`/uploads/${getDownloadFilename(doc)}`}
+                                  href={doc.path.startsWith('http') ? doc.path : `/uploads/${getDownloadFilename(doc)}`}
                                   target="_blank"
+                                  rel="noreferrer"
                                   style={{ color: '#3b82f6', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                                 >
                                   {doc.filename}

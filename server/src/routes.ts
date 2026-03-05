@@ -8,6 +8,8 @@ import nodemailer from 'nodemailer';
 import * as XLSX from 'xlsx';
 import { SyncService } from './syncService';
 import axios from 'axios';
+import archiver from 'archiver';
+import { execSync } from 'child_process';
 
 export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsPath: string, syncService: SyncService) {
   // Middleware to extract user identity from headers
@@ -37,6 +39,19 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
     }
   });
 
+  app.post('/api/sync/check-migration', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required.' });
+      }
+      const existingData = await syncService.checkSupabaseDataExists(userId);
+      res.json(existingData);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post('/api/sync/migrate', async (req: Request, res: Response) => {
     try {
       const { userId } = req.body;
@@ -57,6 +72,60 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
       await syncService.sync();
       res.json({ success: true });
     } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/sync/reset', async (req: Request, res: Response) => {
+    try {
+      await db.resetCloudSession();
+      await syncService.initialize();
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/sync/setup-admin', async (req: Request, res: Response) => {
+    try {
+      const { supabase_url, supabase_key } = req.body;
+      const { createClient } = require('@supabase/supabase-js');
+      const supabase = createClient(supabase_url, supabase_key);
+
+      const adminEmail = 'admin@jobtracker.cloud';
+      const adminPass = 'jobtrackeradmin123';
+      let userId = '';
+
+      // Validate Service Role key by listing users
+      const { data: listData, error: listError } = await supabase.auth.admin.listUsers();
+      if (listError) {
+        throw new Error('Invalid key! Please provide the Service Role (secret) key, not the Anon key, to configure the Architect workspace.');
+      }
+
+      const existingUser = listData.users.find((u: any) => u.email === adminEmail);
+      if (existingUser) {
+        userId = existingUser.id;
+      } else {
+        const { data: createData, error: createError } = await supabase.auth.admin.createUser({
+          email: adminEmail,
+          password: adminPass,
+          email_confirm: true
+        });
+        if (createError) throw createError;
+        userId = createData.user.id;
+      }
+
+      await db.updateSetting('supabase_url', supabase_url);
+      await db.updateSetting('supabase_key', supabase_key);
+      await db.updateSetting('cloud_mode', 'admin');
+      await db.updateSetting('user_id', userId);
+
+      await syncService.initialize();
+
+      res.json({ success: true, user_id: userId });
+    } catch (error: any) {
+      console.error(error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -213,18 +282,25 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
         return res.status(404).json({ error: 'Company not found' });
       }
 
-      // We need to move the file to the logos directory to keep things organized
-      const logosDir = path.join(uploadsPath, 'logos');
-      await fs.ensureDir(logosDir);
-
-      const targetPath = path.join(logosDir, req.file.filename);
-      await fs.move(req.file.path, targetPath);
+      let filePath = req.file.path; // This will be the local temporary path initially
+      const cloudUrl = await syncService.uploadFile(req.file.path, req.file.originalname, 'logos');
+      if (cloudUrl) {
+        filePath = cloudUrl;
+        // If uploaded to cloud, remove the local temporary file
+        await fs.remove(req.file.path).catch(() => { });
+      } else {
+        // If not uploaded to cloud, move to local logos directory
+        const logosDir = path.join(uploadsPath, 'logos');
+        await fs.ensureDir(logosDir);
+        const targetPath = path.join(logosDir, req.file.filename);
+        await fs.move(req.file.path, targetPath);
+        filePath = `/uploads/logos/${req.file.filename}`; // Update filePath to the local relative URL
+      }
 
       // Update the company's logo URL in the database
-      const relativeUrl = `/uploads/logos/${req.file.filename}`;
       const updatedCompany = await db.updateCompany(existingCompany.id, {
         ...existingCompany,
-        logo_url: relativeUrl
+        logo_url: filePath
       });
 
       res.json(updatedCompany);
@@ -692,15 +768,27 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
         return res.status(400).json({ error: 'No file uploaded' });
       }
 
+      let filePath = req.file.path;
+      const cloudUrl = await syncService.uploadFile(req.file.path, req.file.originalname, 'documents');
+      if (cloudUrl) {
+        filePath = cloudUrl;
+        // If uploaded to cloud, remove the local temporary file
+        await fs.remove(req.file.path).catch(() => { });
+      }
+
       const document = await db.createDocument({
         job_id: null,
         filename: req.file.originalname,
-        path: req.file.path,
+        path: filePath,
         type: req.body.type || 'Other'
       });
 
       res.status(201).json(document);
     } catch (error: any) {
+      // Try to clean up if something failed
+      if (req.file) {
+        await fs.remove(req.file.path).catch(() => { });
+      }
       res.status(500).json({ error: error.message });
     }
   });
@@ -711,10 +799,18 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
         return res.status(400).json({ error: 'No file uploaded' });
       }
 
+      let filePath = req.file.path;
+      const cloudUrl = await syncService.uploadFile(req.file.path, req.file.originalname, 'documents');
+      if (cloudUrl) {
+        filePath = cloudUrl;
+        // If uploaded to cloud, remove the local temporary file
+        await fs.remove(req.file.path).catch(() => { });
+      }
+
       const document = await db.createDocument({
         job_id: parseInt(req.params.id),
         filename: req.file.originalname,
-        path: req.file.path,
+        path: filePath,
         type: req.body.type || 'Other'
       });
 
@@ -797,8 +893,55 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
 
   app.get('/api/download/lambda', async (req: Request, res: Response) => {
     try {
+      // Locate the ses-reminder-sender source folder
+      const lambdaSourcePaths = [
+        path.join(__dirname, '..', '..', 'lambda', 'ses-reminder-sender'),
+        path.join(process.cwd(), 'lambda', 'ses-reminder-sender'),
+      ];
+
+      let lambdaSource = '';
+      for (const p of lambdaSourcePaths) {
+        if (await fs.pathExists(path.join(p, 'index.js'))) {
+          lambdaSource = p;
+          break;
+        }
+      }
+
+      if (lambdaSource) {
+        // Ensure node_modules are installed
+        const nmPath = path.join(lambdaSource, 'node_modules');
+        if (!await fs.pathExists(nmPath)) {
+          console.log('[Lambda Download] Running npm install in', lambdaSource);
+          try {
+            execSync('npm install --production', { cwd: lambdaSource, timeout: 60000, stdio: 'pipe' });
+          } catch (installErr) {
+            console.error('[Lambda Download] npm install failed:', installErr);
+          }
+        }
+
+        // Stream the directory as a ZIP
+        res.setHeader('Content-Disposition', 'attachment; filename="ses-reminder-lambda.zip"');
+        res.setHeader('Content-Type', 'application/zip');
+
+        const archive = archiver('zip', { zlib: { level: 9 } });
+        archive.on('error', (err: Error) => {
+          console.error('Archiver error:', err);
+          if (!res.headersSent) res.status(500).json({ error: err.message });
+        });
+        archive.pipe(res);
+        // Add all files except .git
+        archive.glob('**/*', {
+          cwd: lambdaSource,
+          ignore: ['.git/**', '.gitignore'],
+          dot: false
+        });
+        await archive.finalize();
+        return;
+      }
+
+      // Fallback: serve the pre-built ZIP from client/public or client/dist
       const fileName = 'lambda-deployment.zip';
-      const paths = [
+      const fallbackPaths = [
         path.join(__dirname, '..', '..', 'client', 'public', fileName),
         path.join(__dirname, '..', '..', 'client', 'dist', fileName),
         path.join(__dirname, '..', 'client-dist', fileName),
@@ -808,37 +951,18 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
       ];
 
       let filePath = '';
-      console.log('--- Lambda Download Request ---');
-      console.log('CWD:', process.cwd());
-      console.log('__dirname:', __dirname);
-
-      for (const p of paths) {
-        const exists = await fs.pathExists(p);
-        console.log(`Checking path: ${p} - ${exists ? 'EXISTS' : 'NOT FOUND'}`);
-        if (exists) {
-          filePath = p;
-          break;
-        }
+      for (const p of fallbackPaths) {
+        if (await fs.pathExists(p)) { filePath = p; break; }
       }
 
       if (!filePath) {
-        console.error('Lambda ZIP not found in any of:', paths);
-        return res.status(404).json({
-          error: 'Lambda deployment package not found.',
-          diagnostics: {
-            cwd: process.cwd(),
-            dirname: __dirname,
-            checkedPaths: paths
-          }
-        });
+        return res.status(404).json({ error: 'Lambda deployment package not found. Run the app from the project root so the source folder is accessible.' });
       }
 
       res.download(filePath, fileName, (err) => {
         if (err) {
           console.error('Download error:', err);
-          if (!res.headersSent) {
-            res.status(500).json({ error: 'Download failed during streaming', details: err.message });
-          }
+          if (!res.headersSent) res.status(500).json({ error: 'Download failed', details: err.message });
         }
       });
     } catch (error: any) {
@@ -1306,6 +1430,129 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
     } catch (error: any) {
       console.error('Discord test error:', error);
       res.status(500).json({ error: error.response?.data?.message || error.message || 'Discord test failed' });
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // SES / Email: test email + reminder dispatch
+  // -----------------------------------------------------------------------
+
+  /**
+   * POST /api/ses/send-test
+   * Reads SES SMTP credentials from settings and sends a test email.
+   * Works from web browser and desktop alike — no Electron dependency.
+   */
+  app.post('/api/ses/send-test', async (req: Request, res: Response) => {
+    try {
+      const settings = await db.getSettings();
+
+      const smtpHost = settings.ses_smtp_host || `email-smtp.${settings.ses_region || 'us-east-1'}.amazonaws.com`;
+      const smtpPort = parseInt(settings.ses_smtp_port || '587', 10);
+      const smtpUser = settings.ses_key_id || '';
+      const smtpPass = settings.ses_secret_key ? db.decrypt(settings.ses_secret_key) : '';
+      const from = settings.ses_from || '';
+      const to = req.body?.to || settings.ses_recipient || settings.ses_from || '';
+
+      if (!smtpUser || !smtpPass) {
+        return res.status(400).json({ error: 'SES SMTP credentials not configured. Add them in Notifications > Serverless Email.' });
+      }
+      if (!from || !to) {
+        return res.status(400).json({ error: 'From/To email addresses not set. Add them in Notifications > Serverless Email.' });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: { user: smtpUser, pass: smtpPass },
+      });
+
+      await transporter.sendMail({
+        from,
+        to,
+        subject: '[Job CRM] Test email — SES connection confirmed',
+        html: `
+          <div style="font-family:sans-serif;padding:24px;background:#f9fafb;">
+            <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:8px;padding:24px;border:1px solid #e5e7eb;">
+              <h2 style="color:#1f2937;margin-top:0;">✅ SES Connection Confirmed</h2>
+              <p style="color:#374151;">Your Job Application CRM is successfully connected to AWS SES.</p>
+              <p style="color:#374151;">Reminder emails will be sent to <strong>${to}</strong> automatically — even when your PC is off, via the serverless Lambda.</p>
+              <hr style="border:1px solid #f3f4f6;margin:20px 0;"/>
+              <p style="color:#9ca3af;font-size:12px;margin:0;">Sent by Job Application CRM Cloud · ${new Date().toLocaleString()}</p>
+            </div>
+          </div>
+        `,
+      });
+
+      res.json({ ok: true, to });
+    } catch (error: any) {
+      console.error('SES test email error:', error);
+      res.status(500).json({ error: error.message || 'Failed to send SES test email' });
+    }
+  });
+
+  /**
+   * POST /api/ses/send-due-reminders
+   * Manually triggers a reminder email sweep (same logic as Lambda, useful for testing or
+   * if the user doesn't have Lambda set up yet).
+   */
+  app.post('/api/ses/send-due-reminders', async (req: Request, res: Response) => {
+    try {
+      const userId = await db.getUserId();
+      if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+      const settings = await db.getSettings();
+      const smtpHost = settings.ses_smtp_host || `email-smtp.${settings.ses_region || 'us-east-1'}.amazonaws.com`;
+      const smtpPort = parseInt(settings.ses_smtp_port || '587', 10);
+      const smtpUser = settings.ses_key_id || '';
+      const smtpPass = settings.ses_secret_key ? db.decrypt(settings.ses_secret_key) : '';
+      const from = settings.ses_from || '';
+      const to = settings.ses_recipient || settings.ses_from || '';
+
+      if (!smtpUser || !smtpPass || !from || !to) {
+        return res.status(400).json({ error: 'SES credentials or From/To email not configured.' });
+      }
+
+      const now = new Date().toISOString();
+      const reminders = await db.all(
+        `SELECT * FROM reminders WHERE user_id = ? AND notify_email = 1 AND sent_at IS NULL AND due_at <= ?`,
+        [userId, now]
+      );
+
+      if (reminders.length === 0) {
+        return res.json({ sent: 0, message: 'No due email reminders found.' });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: smtpHost, port: smtpPort, secure: smtpPort === 465, auth: { user: smtpUser, pass: smtpPass },
+      });
+
+      const threshold = parseInt(settings.notification_email_summary_threshold || '5', 10);
+      let sentCount = 0;
+
+      if (reminders.length >= threshold) {
+        const html = `<div style="font-family:sans-serif;padding:24px;"><h2>📋 ${reminders.length} Job Application Reminders Due</h2><ul>${reminders.map((r: any) => `<li>${r.message} <small>(due ${new Date(r.due_at).toLocaleString()})</small></li>`).join('')}</ul></div>`;
+        await transporter.sendMail({ from, to, subject: `[Job CRM] ${reminders.length} reminders need your attention`, html });
+        for (const r of reminders) {
+          await db.run(`UPDATE reminders SET sent_at = ? WHERE id = ?`, [new Date().toISOString(), r.id]);
+        }
+        sentCount = reminders.length;
+      } else {
+        for (const r of reminders) {
+          await transporter.sendMail({
+            from, to,
+            subject: `[Job CRM] Reminder: ${r.message.substring(0, 80)}`,
+            html: `<div style="font-family:sans-serif;padding:24px;"><p>${r.message}</p><p style="color:#9ca3af;font-size:12px;">Due: ${new Date(r.due_at).toLocaleString()}</p></div>`
+          });
+          await db.run(`UPDATE reminders SET sent_at = ? WHERE id = ?`, [new Date().toISOString(), r.id]);
+          sentCount++;
+        }
+      }
+
+      res.json({ sent: sentCount });
+    } catch (error: any) {
+      console.error('SES send-due-reminders error:', error);
+      res.status(500).json({ error: error.message });
     }
   });
 }

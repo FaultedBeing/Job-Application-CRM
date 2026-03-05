@@ -1,0 +1,52 @@
+[
+  {
+    "id": 657,
+    "table_name": "interview_questions",
+    "record_id": 1,
+    "record_key": null,
+    "action": "INSERT",
+    "data": "{\"id\":1,\"type\":\"non-technical\",\"question\":\"Walk me through the engineering design process\",\"answer\":\"A) Begin by setting the scope of the problem\\n     - What are the inputs and outputs\\n     - Where does this \\\"thing\\\" interface with other systems?\\n     - What are the requirements (operational environment, expected use case, etc)\\n\\nA2) Trade studies\\n     - Look at different approaches to the problem\\n     - see what is available and done already\\n\\nB) Consider manufacturing processes\\n     - Material choice\\n     - Conventional subtractive machining?\\n     - 3d printing?\\n          - SLA\\n          - DMLS\\n     - Sourcing off the shelf?\\n\\nB2) Simulations\\n     - If necessary go through any simulations to prove a design may be viable in concept\\n\\nC) Prototyping\\n      - Goals?\\n          - Conceptual, proof of concept, characterization?\\n     - Main goal is to remove as many unknown factors before you commit to a more expensive manufacturing method or components\\n\\nTesting to prove calculations/simulations vs qualification testing!\\n\\nD) Testing\\n     - List the things the object in question will be exposed to, and create a test environment or tests that will be able to verify it will work in those expected environments\\n     - Ideally iterate as much as possible in prototyping phase, to reduce cost and turn around times. But it is unavoidable that iteration sometimes happens with production hardware.\",\"created_at\":\"2026-03-01 00:23:33\",\"updated_at\":\"2026-03-04 22:06:35\",\"user_id\":\"3e00a304-193a-4b95-8589-5c57c16ef21d\"}",
+    "user_id": "3e00a304-193a-4b95-8589-5c57c16ef21d",
+    "created_at": "2026-03-04 22:44:26"
+  },
+  {
+    "id": 656,
+    "table_name": "documents",
+    "record_id": 6,
+    "record_key": null,
+    "action": "INSERT",
+    "data": "{\"id\":6,\"job_id\":62,\"filename\":\"Max_Oberg_Resume-test.pdf\",\"path\":\"C:\\\\Users\\\\Maxob\\\\AppData\\\\Roaming\\\\job-tracker-desktop\\\\uploads\\\\1772579807972-929496650-Max_Oberg_Resume-2.pdf\",\"type\":\"Resume\",\"created_at\":\"2026-03-03 23:16:47\",\"user_id\":\"3e00a304-193a-4b95-8589-5c57c16ef21d\",\"updated_at\":\"2026-03-04 22:06:35\"}",
+    "user_id": "3e00a304-193a-4b95-8589-5c57c16ef21d",
+    "created_at": "2026-03-04 22:44:26"
+  },
+  {
+    "id": 655,
+    "table_name": "documents",
+    "record_id": 5,
+    "record_key": null,
+    "action": "INSERT",
+    "data": "{\"id\":5,\"job_id\":null,\"filename\":\"Max_Oberg_Resume.pdf\",\"path\":\"C:\\\\Users\\\\Maxob\\\\AppData\\\\Roaming\\\\job-tracker-desktop\\\\uploads\\\\1771990037081-331820895-Max_Oberg_Resume-1.pdf\",\"type\":\"Resume\",\"created_at\":\"2026-02-25 03:27:17\",\"user_id\":\"3e00a304-193a-4b95-8589-5c57c16ef21d\",\"updated_at\":\"2026-03-04 22:06:35\"}",
+    "user_id": "3e00a304-193a-4b95-8589-5c57c16ef21d",
+    "created_at": "2026-03-04 22:44:26"
+  },
+  {
+    "id": 654,
+    "table_name": "documents",
+    "record_id": 4,
+    "record_key": null,
+    "action": "INSERT",
+    "data": "{\"id\":4,\"job_id\":null,\"filename\":\"Max Oberg Portfolio.pdf\",\"path\":\"C:\\\\Users\\\\Maxob\\\\AppData\\\\Roaming\\\\job-tracker-desktop\\\\uploads\\\\1771989398314-743910791-Max Oberg Portfolio.pdf\",\"type\":\"Portfolio\",\"created_at\":\"2026-02-25 03:16:38\",\"user_id\":\"3e00a304-193a-4b95-8589-5c57c16ef21d\",\"updated_at\":\"2026-03-04 22:06:35\"}",
+    "user_id": "3e00a304-193a-4b95-8589-5c57c16ef21d",
+    "created_at": "2026-03-04 22:44:26"
+  },
+  {
+    "id": 653,
+    "table_name": "notifications",
+    "record_id": 32,
+    "record_key": null,
+    "action": "INSERT",
+    "data": "{\"id\":32,\"reminder_id\":23,\"entity_type\":\"job\",\"entity_id\":64,\"due_at\":\"2026-02-27T18:16:00.000Z\",\"title\":\" Propulsion Development Engineer  @ Impulse Space\",\"message\":\"One mroe for good measure\",\"link_path\":\"/job/64\",\"notify_desktop\":1,\"notify_email\":0,\"delivered_desktop_at\":\"2026-02-27 18:16:22\",\"delivered_email_at\":null,\"read_at\":null,\"dismissed_at\":\"2026-02-27 18:28:02\",\"created_at\":\"2026-02-27 18:16:22\",\"logo_url\":\"https://icons.duckduckgo.com/ip3/impulsespace.com.ico\",\"icon_bg\":null,\"user_id\":\"3e00a304-193a-4b95-8589-5c57c16ef21d\",\"updated_at\":\"2026-03-04 22:06:34\"}",
+    "user_id": "3e00a304-193a-4b95-8589-5c57c16ef21d",
+    "created_at": "2026-03-04 22:44:26"
+  }
+]

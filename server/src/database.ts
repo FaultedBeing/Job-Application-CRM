@@ -37,7 +37,7 @@ export class Database {
   }
 
   // Encrypt sensitive data
-  private encrypt(text: string): string {
+  encrypt(text: string): string {
     if (!text) return text;
     try {
       const key = this.getEncryptionKey();
@@ -58,7 +58,7 @@ export class Database {
   }
 
   // Decrypt sensitive data
-  private decrypt(encryptedText: string): string {
+  decrypt(encryptedText: string): string {
     if (!encryptedText) return encryptedText;
 
     // Check if it's already encrypted (has the format iv:authTag:encrypted)
@@ -93,12 +93,61 @@ export class Database {
     }
   }
 
-  // List of settings keys that should be encrypted
-  private readonly ENCRYPTED_KEYS = [
+  // ---------------------------------------------------------------------------
+  // Cloud-safe encryption (portable — not bound to this machine)
+  //
+  // Uses AES-256-GCM with a key derived from the user's portablePassphrase via
+  // PBKDF2. The same passphrase set in the app must be provided to Lambda as the
+  // SETTINGS_ENCRYPTION_KEY env var so it can decrypt.
+  //
+  // Format stored in Supabase: "CLOUD:<ivHex>:<authTagHex>:<ciphertextHex>"
+  // ---------------------------------------------------------------------------
+  private static readonly CLOUD_SALT = 'job-crm-supabase-settings-v1';
+
+  encryptForCloud(plaintext: string, passphrase: string): string {
+    if (!plaintext || !passphrase) return plaintext;
+    try {
+      const key = crypto.pbkdf2Sync(passphrase, Database.CLOUD_SALT, 100000, 32, 'sha256');
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+
+      let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+      encrypted += cipher.final('hex');
+      const authTag = cipher.getAuthTag();
+
+      return `CLOUD:${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
+    } catch (error) {
+      console.error('Cloud encryption error:', error);
+      return plaintext; // Fallback — syncService will log a warning
+    }
+  }
+
+  decryptFromCloud(ciphertext: string, passphrase: string): string {
+    if (!ciphertext || !passphrase) return ciphertext;
+    if (!ciphertext.startsWith('CLOUD:')) return ciphertext; // Not cloud-encrypted, return as-is
+    try {
+      const [, ivHex, authTagHex, encrypted] = ciphertext.split(':');
+      const key = crypto.pbkdf2Sync(passphrase, Database.CLOUD_SALT, 100000, 32, 'sha256');
+      const iv = Buffer.from(ivHex, 'hex');
+      const authTag = Buffer.from(authTagHex, 'hex');
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(authTag);
+      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    } catch (error) {
+      console.error('Cloud decryption error:', error);
+      return ciphertext;
+    }
+  }
+
+  // List of settings keys that should be encrypted at rest (hardware-bound)
+  readonly ENCRYPTED_KEYS = [
     'smtp_host',
     'smtp_user',
     'smtp_pass',
-    'gmail_client_secret'
+    'gmail_client_secret',
+    'ses_secret_key'   // AWS SES SMTP password — re-encrypted with user passphrase before Supabase sync
   ];
 
   async run(sql: string, params: any[] = [], skipSync = false): Promise<any> {
@@ -216,6 +265,22 @@ export class Database {
     } catch (err) {
       await this.run('ROLLBACK', [], true);
       console.error(`Migration error:`, err);
+      throw err;
+    }
+  }
+
+  async resetCloudSession() {
+    const tables = ['companies', 'jobs', 'contacts', 'interactions', 'reminders', 'notifications', 'documents', 'interview_questions'];
+    await this.run('BEGIN TRANSACTION', [], true);
+    try {
+      for (const table of tables) {
+        await this.run(`UPDATE ${table} SET user_id = NULL`, [], true);
+      }
+      await this.run('DELETE FROM sync_queue', [], true);
+      await this.run('DELETE FROM settings WHERE key IN ("supabase_url", "supabase_key", "cloud_mode")', [], true);
+      await this.run('COMMIT', [], true);
+    } catch (err) {
+      await this.run('ROLLBACK', [], true);
       throw err;
     }
   }
@@ -505,6 +570,7 @@ export class Database {
         record_key TEXT, -- for settings
         action TEXT NOT NULL, -- 'INSERT', 'UPDATE', 'DELETE'
         data TEXT, -- JSON snapshot if needed, or null
+        synced_at DATETIME,
         user_id TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
@@ -522,6 +588,8 @@ export class Database {
         await this.run(`UPDATE ${table} SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
       } catch (e) { }
     }
+
+    try { await this.run(`ALTER TABLE sync_queue ADD COLUMN synced_at DATETIME`); } catch (e) { }
 
     // Initialize default settings
     const username = await this.get('SELECT value FROM settings WHERE key = ?', ['username']);

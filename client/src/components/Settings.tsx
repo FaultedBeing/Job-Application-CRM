@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
-import { Download, Trash2, Cloud } from 'lucide-react';
+import { Download, Trash2, Cloud, Smartphone, Copy, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ConfirmDialog from './ConfirmDialog';
+import { isElectron } from '../utils/env';
 
 export default function Settings() {
   const [username, setUsername] = useState('');
@@ -20,6 +21,9 @@ export default function Settings() {
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [syncStatus, setSyncStatus] = useState<any>(null);
   const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; confirmLabel?: string; confirmColor?: string; onConfirm: () => void } | null>(null);
+  const [showMobileUrl, setShowMobileUrl] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [tailscaleIp, setTailscaleIp] = useState('');
 
   useEffect(() => {
     loadSettings().then(() => setInitialLoaded(true));
@@ -776,49 +780,103 @@ export default function Settings() {
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ color: '#9ca3af', fontSize: '0.9rem' }}>User Identity:</span>
-            <span style={{ color: '#e5e7eb', fontFamily: 'monospace' }}>{localStorage.getItem('cloud_user_id') || 'None'}</span>
+            <span style={{ color: '#e5e7eb', fontFamily: 'monospace', fontSize: '0.8rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{localStorage.getItem('cloud_user_id') || 'None'}</span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
+          {isElectron() && (
+            <button
+              onClick={async () => {
+                try {
+                  showToast('Preparing download...', 'info');
+                  const res = await api.get('/download/lambda', { responseType: 'blob' });
+                  const blob = new Blob([res.data], { type: 'application/zip' });
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'job-crm-lambda-blueprint.zip';
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  window.URL.revokeObjectURL(url);
+                  showToast('Blueprint downloaded successfully!', 'success');
+                } catch (err: any) {
+                  showToast('Failed to download blueprint', 'error');
+                }
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                padding: '0.75rem 1.25rem', backgroundColor: '#2d3139',
+                color: '#e5e7eb', border: '1px solid #3b82f6', borderRadius: '6px',
+                fontWeight: '600', cursor: 'pointer'
+              }}
+            >
+              <Download size={18} />
+              Lambda Blueprint
+            </button>
+          )}
+
           <button
-            onClick={async () => {
-              try {
-                showToast('Preparing download...', 'info');
-                const res = await api.get('/download/lambda', { responseType: 'blob' });
-                const blob = new Blob([res.data], { type: 'application/zip' });
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'job-crm-lambda-blueprint.zip';
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
-                showToast('Blueprint downloaded successfully!', 'success');
-              } catch (err: any) {
-                console.error('Failed to download lambda blueprint:', err);
-                showToast('Failed to download blueprint: ' + (err.response?.data?.error || err.message), 'error');
-              }
-            }}
+            onClick={() => setShowMobileUrl(!showMobileUrl)}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.6rem 1.25rem',
-              backgroundColor: '#374151',
-              border: '1px solid #4b5563',
-              borderRadius: '6px',
-              color: '#e5e7eb',
-              fontWeight: 600,
-              cursor: 'pointer',
-              textDecoration: 'none'
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.75rem 1.5rem', backgroundColor: '#fbbf241a',
+              color: '#fbbf24', border: '1px solid #fbbf24',
+              borderRadius: '6px', fontWeight: '600', cursor: 'pointer'
             }}
           >
-            <Download size={18} />
-            Download AWS Blueprint
+            <Smartphone size={18} />
+            Mobile Sync
           </button>
+        </div>
 
+        {showMobileUrl && (
+          <div style={{ padding: '1.5rem', backgroundColor: '#0f1115', borderRadius: '8px', border: '1px solid #fbbf2433' }}>
+            <h3 style={{ fontSize: '1rem', color: '#fbbf24', marginBottom: '0.75rem' }}>Sync with your Phone</h3>
+            <p style={{ fontSize: '0.85rem', color: '#9ca3af', marginBottom: '1rem' }}>
+              Enter your PC's Tailscale IP to generate a unique link. Open it on your phone to instantly log in.
+            </p>
+            <input
+              type="text"
+              placeholder="Ex: 100.123.45.67"
+              value={tailscaleIp}
+              onChange={(e) => setTailscaleIp(e.target.value)}
+              style={{
+                width: '100%', padding: '0.75rem', marginBottom: '1rem',
+                backgroundColor: '#1a1d24', border: '1px solid #2d3139',
+                borderRadius: '6px', color: '#e5e7eb'
+              }}
+            />
+            {tailscaleIp && (
+              <div style={{
+                padding: '0.75rem 1rem', backgroundColor: '#1a1d24', borderRadius: '6px',
+                border: '1px solid #2d3139', display: 'flex', alignItems: 'center',
+                justifyContent: 'space-between', gap: '1rem'
+              }}>
+                <code style={{ fontSize: '0.7rem', color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {`http://${tailscaleIp}:3033/?set_user_id=${localStorage.getItem('cloud_user_id')}`}
+                </code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(`http://${tailscaleIp}:3033/?set_user_id=${localStorage.getItem('cloud_user_id')}`);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  style={{ background: 'none', border: 'none', color: copied ? '#10b981' : '#fbbf24', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
+                >
+                  {copied ? <Check size={18} /> : <Copy size={18} />}
+                  <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>{copied ? 'Copied!' : 'Copy'}</span>
+                </button>
+              </div>
+            )}
+            <p style={{ marginTop: '0.75rem', fontSize: '0.75rem', color: '#6b7280', fontStyle: 'italic' }}>
+              Tip: Send this link to your phone and open it while Tailscale is running.
+            </p>
+          </div>
+        )}
+
+        <div style={{ marginTop: '1rem' }}>
           <button
             onClick={() => {
               setPendingConfirm({
@@ -827,6 +885,11 @@ export default function Settings() {
                 confirmLabel: 'Sign Out',
                 confirmColor: '#ef4444',
                 onConfirm: async () => {
+                  try {
+                    await api.post('/sync/reset');
+                  } catch (e) {
+                    console.warn('Backend reset failed or is unreachable:', e);
+                  }
                   setPendingConfirm(null);
                   localStorage.removeItem('cloud_user_id');
                   showToast('Cloud session reset. Refreshing...', 'success');
@@ -835,16 +898,10 @@ export default function Settings() {
               });
             }}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.6rem 1.25rem',
-              backgroundColor: 'transparent',
-              border: '1px solid #ef4444',
-              borderRadius: '6px',
-              color: '#ef4444',
-              fontWeight: 600,
-              cursor: 'pointer'
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.6rem 1.25rem', backgroundColor: 'transparent',
+              border: '1px solid #ef4444', borderRadius: '6px',
+              color: '#ef4444', fontWeight: 600, cursor: 'pointer'
             }}
           >
             Sign Out / Reset Session

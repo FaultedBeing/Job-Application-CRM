@@ -21,6 +21,16 @@ body {
   min-height: 100vh;
 }
 
+.main-content {
+  margin-left: 250px;
+}
+
+@media (max-width: 767px) {
+  .main-content {
+    margin-left: 0 !important;
+  }
+}
+
 button {
   cursor: pointer;
   font-family: inherit;

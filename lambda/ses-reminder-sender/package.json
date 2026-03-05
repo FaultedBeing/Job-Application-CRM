@@ -1,0 +1,9 @@
+{
+    "name": "ses-reminder-sender",
+    "version": "1.0.0",
+    "description": "Serverless email reminder sender for Job Application CRM",
+    "main": "index.js",
+    "dependencies": {
+        "nodemailer": "^6.9.9"
+    }
+}

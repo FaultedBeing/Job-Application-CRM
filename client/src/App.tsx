@@ -19,6 +19,17 @@ function App() {
 
   useEffect(() => {
     const checkCloud = async () => {
+      // --- MOBILE IDENTITY SYNC HANDLER ---
+      const params = new URLSearchParams(window.location.search);
+      const setUserId = params.get('set_user_id');
+
+      if (setUserId) {
+        localStorage.setItem('cloud_user_id', setUserId);
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, '', newUrl);
+      }
+      // --- END HANDLER ---
+
       try {
         const res = await api.get('/sync/status');
         const status = res.data;

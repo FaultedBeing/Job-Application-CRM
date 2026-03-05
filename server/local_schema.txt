@@ -1,0 +1,180 @@
+companies:
+CREATE TABLE companies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        website TEXT,
+        industry TEXT,
+        notes TEXT,
+        location TEXT,
+        dark_logo_bg INTEGER DEFAULT 0,
+        no_posted_jobs INTEGER DEFAULT 0,
+        no_appropriate_jobs INTEGER DEFAULT 0,
+        last_interaction DATETIME DEFAULT CURRENT_TIMESTAMP,
+        logo_url TEXT,
+        employee_count INTEGER,
+        company_size TEXT,
+        financial_stability_warning INTEGER DEFAULT 0,
+        excitement_rating INTEGER DEFAULT 0,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+
+sqlite_sequence:
+CREATE TABLE sqlite_sequence(name,seq)
+
+jobs:
+CREATE TABLE jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER,
+        company_name TEXT,
+        title TEXT NOT NULL,
+        location TEXT,
+        status TEXT DEFAULT 'Wishlist',
+        link TEXT,
+        description TEXT,
+        notes TEXT,
+        excitement_score INTEGER DEFAULT 3,
+        fit_score INTEGER DEFAULT 3,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (company_id) REFERENCES companies(id)
+      )
+
+contacts:
+CREATE TABLE contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        company_id INTEGER,
+        job_id INTEGER,
+        role TEXT,
+        email TEXT,
+        phone TEXT,
+        notes TEXT,
+        last_interaction DATETIME DEFAULT CURRENT_TIMESTAMP,
+        linkedin_url TEXT,
+        next_check_in DATETIME,
+        is_prospective INTEGER DEFAULT 0,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, social_platform TEXT, social_handle TEXT, email_draft TEXT,
+        FOREIGN KEY (company_id) REFERENCES companies(id),
+        FOREIGN KEY (job_id) REFERENCES jobs(id)
+      )
+
+interactions:
+CREATE TABLE interactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER,
+        contact_id INTEGER,
+        company_id INTEGER,
+        type TEXT,
+        content TEXT,
+        date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (job_id) REFERENCES jobs(id),
+        FOREIGN KEY (contact_id) REFERENCES contacts(id),
+        FOREIGN KEY (company_id) REFERENCES companies(id)
+      )
+
+reminders:
+CREATE TABLE reminders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL, -- 'contact' | 'company' | 'interaction'
+        entity_id INTEGER NOT NULL,
+        source TEXT NOT NULL DEFAULT 'manual', -- e.g. 'next_check_in' for contacts
+        due_at DATETIME NOT NULL,
+        message TEXT NOT NULL,
+        link_path TEXT,
+        notify_email INTEGER DEFAULT 0,
+        sent_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        user_id TEXT
+      , notify_desktop INTEGER DEFAULT 1, notify_sms INTEGER DEFAULT 0, contact_id INTEGER)
+
+notifications:
+CREATE TABLE notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reminder_id INTEGER,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER NOT NULL,
+        due_at DATETIME NOT NULL,
+        title TEXT,
+        message TEXT NOT NULL,
+        link_path TEXT,
+        notify_desktop INTEGER DEFAULT 1,
+        notify_email INTEGER DEFAULT 0,
+        delivered_desktop_at DATETIME,
+        delivered_email_at DATETIME,
+        read_at DATETIME,
+        dismissed_at DATETIME,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      , logo_url TEXT, icon_bg TEXT, notify_sms INTEGER DEFAULT 0, delivered_sms_at DATETIME)
+
+email_drafts:
+CREATE TABLE email_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contact_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+      )
+
+documents:
+CREATE TABLE documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER,
+        filename TEXT NOT NULL,
+        path TEXT NOT NULL,
+        type TEXT,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (job_id) REFERENCES jobs(id)
+      )
+
+interview_questions:
+CREATE TABLE interview_questions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        question TEXT NOT NULL,
+        answer TEXT,
+        user_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+
+settings:
+CREATE TABLE settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        user_id TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+
+activity_log:
+CREATE TABLE activity_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL, -- 'create' | 'update' | 'delete'
+        entity_type TEXT NOT NULL, -- 'job' | 'contact' | 'interaction' | 'company' | 'note'
+        entity_id INTEGER,
+        description TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        user_id TEXT
+      )
+
+sync_queue:
+CREATE TABLE sync_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        table_name TEXT NOT NULL,
+        record_id INTEGER,
+        record_key TEXT, -- for settings
+        action TEXT NOT NULL, -- 'INSERT', 'UPDATE', 'DELETE'
+        data TEXT, -- JSON snapshot if needed, or null
+        user_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
