@@ -45,7 +45,7 @@ interface Settings {
 }
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({ total: 0, interviewing: 0, offers: 0 });
+  const [stats, setStats] = useState({ total: 0, applied: 0, interviewing: 0, offers: 0 });
   const [topJobs, setTopJobs] = useState<Job[]>([]);
   const [recentCompanies, setRecentCompanies] = useState<Company[]>([]);
   const [recentContacts, setRecentContacts] = useState<Contact[]>([]);
@@ -79,6 +79,7 @@ export default function Dashboard() {
 
       // Calculate stats
       const total = jobs.length;
+      const applied = jobs.filter(j => j.status === 'Applied').length;
       const interviewing = jobs.filter(j => j.status === 'Interviewing').length;
       const offers = jobs.filter(j => j.status === 'Offer').length;
 
@@ -97,7 +98,7 @@ export default function Dashboard() {
         .sort((a, b) => new Date(b.last_interaction).getTime() - new Date(a.last_interaction).getTime())
         .slice(0, 5);
 
-      setStats({ total, interviewing, offers });
+      setStats({ total, applied, interviewing, offers });
       setTopJobs(sortedJobs);
       setRecentCompanies(sortedCompanies);
       setRecentContacts(sortedContacts);
@@ -194,8 +195,9 @@ export default function Dashboard() {
       )}
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
         <StatCard icon={Briefcase} label="Total Applications" value={stats.total} color="#3b82f6" />
+        <StatCard icon={TrendingUp} label="Applied" value={stats.applied} color="#a78bfa" />
         <StatCard icon={TrendingUp} label="Interviewing" value={stats.interviewing} color="#fbbf24" />
         <StatCard icon={Briefcase} label="Offers" value={stats.offers} color="#34d399" />
       </div>

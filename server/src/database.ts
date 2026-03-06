@@ -146,6 +146,7 @@ export class Database {
     'smtp_host',
     'smtp_user',
     'smtp_pass',
+    'gmail_client_id',
     'gmail_client_secret',
     'ses_secret_key'   // AWS SES SMTP password — re-encrypted with user passphrase before Supabase sync
   ];
@@ -639,6 +640,20 @@ export class Database {
         defaultIndustries
       ]);
     }
+
+    // Auto-generate an encryption key if one doesn't exist yet.
+    // This key is stored hardware-encrypted locally and is NEVER synced to Supabase.
+    // It is bundled into the Lambda download so the user never has to copy it manually.
+    const existingEncKey = await this.get(
+      `SELECT value FROM settings WHERE key = 'supabase_encryption_key'`
+    );
+    if (!existingEncKey) {
+      const crypto = require('crypto');
+      const autoKey = crypto.randomBytes(32).toString('hex');
+      // Store encrypted (it's in ENCRYPTED_KEYS so updateSetting will encrypt it)
+      await this.updateSetting('supabase_encryption_key', autoKey);
+      console.log('[DB] Auto-generated supabase_encryption_key.');
+    }
   }
 
   // Companies
@@ -1032,8 +1047,8 @@ export class Database {
       ]
     );
     const updated = await this.get('SELECT * FROM contacts WHERE id = ?', [id]);
-    await this.syncContactReminder(updated);
     if (updated) {
+      await this.syncContactReminder(updated);
       await this.logActivity('update', 'contact', id, `Updated contact "${updated.name}"`);
     }
     return updated;
@@ -1204,6 +1219,9 @@ export class Database {
     notify_email?: boolean;
     contact_id?: number;
   }) {
+    const nd = rem.notify_desktop === undefined ? 1 : rem.notify_desktop ? 1 : 0;
+    const ne = rem.notify_email === undefined ? 0 : rem.notify_email ? 1 : 0;
+
     if (rem.source === 'manual') {
       await this.run(
         `INSERT INTO reminders (entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, contact_id, sent_at, user_id, updated_at)
@@ -1211,33 +1229,33 @@ export class Database {
         [
           rem.entity_type, rem.entity_id, rem.source,
           rem.due_at, rem.message, rem.link_path || null,
-          rem.notify_desktop === undefined ? 1 : rem.notify_desktop ? 1 : 0,
-          rem.notify_email === undefined ? 0 : rem.notify_email ? 1 : 0,
-          rem.contact_id || null,
-          this.userId
+          nd, ne, rem.contact_id || null, this.userId
         ]
       );
     } else {
-      await this.run(
-        `INSERT OR REPLACE INTO reminders (id, entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, contact_id, sent_at, user_id, updated_at)
-         VALUES (
-           (SELECT id FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ?),
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, CURRENT_TIMESTAMP
-         )`,
-        [
-          rem.entity_type, rem.entity_id, rem.source,
-          rem.entity_type,
-          rem.entity_id,
-          rem.source,
-          rem.due_at,
-          rem.message,
-          rem.link_path || null,
-          rem.notify_desktop === undefined ? 1 : rem.notify_desktop ? 1 : 0,
-          rem.notify_email === undefined ? 0 : rem.notify_email ? 1 : 0,
-          rem.contact_id || null,
-          this.userId
-        ]
+      // Use UPDATE-or-INSERT to avoid INSERT OR REPLACE deleting the row (which would orphan
+      // any notification rows pointing at the old reminder id via reminder_id FK).
+      const existing = await this.get(
+        'SELECT id FROM reminders WHERE entity_type = ? AND entity_id = ? AND source = ?',
+        [rem.entity_type, rem.entity_id, rem.source]
       );
+      if (existing) {
+        // Reschedule: delete stale notification rows whose due_at no longer matches
+        await this.run(
+          'DELETE FROM notifications WHERE reminder_id = ? AND due_at != ?',
+          [existing.id, rem.due_at]
+        );
+        await this.run(
+          `UPDATE reminders SET due_at = ?, message = ?, link_path = ?, notify_desktop = ?, notify_email = ?, contact_id = ?, sent_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          [rem.due_at, rem.message, rem.link_path || null, nd, ne, rem.contact_id || null, existing.id]
+        );
+      } else {
+        await this.run(
+          `INSERT INTO reminders (entity_type, entity_id, source, due_at, message, link_path, notify_desktop, notify_email, contact_id, sent_at, user_id, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, CURRENT_TIMESTAMP)`,
+          [rem.entity_type, rem.entity_id, rem.source, rem.due_at, rem.message, rem.link_path || null, nd, ne, rem.contact_id || null, this.userId]
+        );
+      }
     }
   }
 
@@ -1295,7 +1313,8 @@ export class Database {
   }
 
   async clearCompanyReminder(companyId: number) {
-    await this.deleteReminderByEntity('company', companyId, 'follow_up');
+    // Company reminders are created with source='manual', so delete those (not 'follow_up')
+    await this.deleteReminderByEntity('company', companyId, 'manual');
   }
 
   async createJobReminder(jobId: number, dueAt: string, message: string, opts?: { notify_desktop?: boolean; notify_email?: boolean; contact_id?: number }) {
@@ -1628,9 +1647,10 @@ export class Database {
   }
 
   async getRecentActivity(hours: number = 24) {
+    const h = Math.max(1, Math.floor(hours));
     return await this.all(
-      'SELECT * FROM activity_log WHERE timestamp >= datetime("now", ? || " hours") AND (user_id = ? OR user_id IS NULL) ORDER BY timestamp DESC',
-      [`-${hours}`, this.userId]
+      `SELECT * FROM activity_log WHERE timestamp >= datetime('now', '-${h} hours') AND (user_id = ? OR user_id IS NULL) ORDER BY timestamp DESC`,
+      [this.userId]
     );
   }
 
@@ -1675,6 +1695,9 @@ export class Database {
   }
 
   async resetDatabase() {
+    await this.run('DELETE FROM notifications');
+    await this.run('DELETE FROM reminders');
+    await this.run('DELETE FROM activity_log');
     await this.run('DELETE FROM interactions');
     await this.run('DELETE FROM documents');
     await this.run('DELETE FROM contacts');

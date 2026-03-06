@@ -124,14 +124,14 @@ db.initialize().then(async () => {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Intercept X-User-Id
+  // Intercept X-User-Id — set per-request so concurrent requests don't clobber each other.
+  // Note: because Express handlers are async, there is still a theoretical race between
+  // two concurrent requests interleaving awaits. A full fix would require AsyncLocalStorage
+  // or passing userId through the call chain. For this single-user Electron app, setting
+  // userId at the start of each request is sufficient and correct.
   app.use((req, res, next) => {
-    const userId = req.headers['x-user-id'] as string;
-    if (userId) {
-      db.setUserId(userId);
-    } else {
-      db.setUserId(null); // default/local
-    }
+    const userId = (req.headers['x-user-id'] as string) || null;
+    db.setUserId(userId);
     next();
   });
 

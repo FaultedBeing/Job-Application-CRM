@@ -1,5 +1,38 @@
 /* Layout and Sidebar Responsive Styles */
 
+/* ── Mobile: sidebar slides in from left as a drawer ── */
+@media (max-width: 767px) {
+    .sidebar-panel {
+        transform: translateX(-100%);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .sidebar-panel.open {
+        transform: translateX(0);
+    }
+
+    .main-content {
+        margin-left: 0 !important;
+    }
+
+    .desktop-only {
+        display: none !important;
+    }
+}
+
+/* ── Desktop: sidebar is always visible, no transform ── */
+@media (min-width: 768px) {
+    .sidebar-panel {
+        transform: none !important;
+        transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .mobile-only {
+        display: none !important;
+    }
+}
+
+/* Mobile overlay behind open sidebar */
 .mobile-sidebar-overlay {
     position: fixed;
     top: 0;
@@ -12,15 +45,6 @@
     animation: fadeIn 0.2s ease-out;
 }
 
-.sidebar-mobile {
-    transform: translateX(-100%);
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.sidebar-mobile.open {
-    transform: translateX(0);
-}
-
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -31,23 +55,7 @@
     }
 }
 
-@media (max-width: 767px) {
-    .main-content {
-        margin-left: 0 !important;
-    }
-
-    .desktop-only {
-        display: none !important;
-    }
-}
-
-@media (min-width: 768px) {
-    .mobile-only {
-        display: none !important;
-    }
-}
-
-/* Touch targets */
+/* Touch targets on coarse-pointer devices */
 @media (pointer: coarse) {
 
     button,

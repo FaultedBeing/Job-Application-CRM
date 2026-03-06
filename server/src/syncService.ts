@@ -142,6 +142,8 @@ export class SyncService {
             await this.ensureBucket();
             await this.pushLocalChanges();
             await this.pullRemoteChanges();
+            // Always record when the last successful sync ran (regardless of whether new data was found)
+            await this.db.updateSetting('last_cloud_sync', new Date().toISOString());
             // FIX #5: Prune stale (already-synced) queue rows older than 7 days to prevent unbounded growth
             await this.db.run(
                 `DELETE FROM sync_queue WHERE synced_at IS NOT NULL AND created_at < datetime('now', '-7 days')`,

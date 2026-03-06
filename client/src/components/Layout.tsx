@@ -1,5 +1,5 @@
 import { ReactNode, useState, useEffect } from 'react';
-import Sidebar from './Sidebar';
+import Sidebar, { SIDEBAR_FULL_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from './Sidebar';
 import NotificationHub from './NotificationHub';
 import DebugConsole from './DebugConsole';
 import UpdateBanner from './UpdateBanner';
@@ -14,29 +14,37 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobileLayout());
+  const [isMobileOpen, setIsMobileOpen] = useState(false);   // mobile drawer open/closed
+  const [isCollapsed, setIsCollapsed] = useState(false);      // desktop icon-only mode
   const [isMobile, setIsMobile] = useState(isMobileLayout());
 
   useEffect(() => {
     const handleResize = () => {
       const mobile = isMobileLayout();
       setIsMobile(mobile);
-      if (!mobile) setIsSidebarOpen(true);
+      // Close mobile drawer if resized to desktop
+      if (!mobile) setIsMobileOpen(false);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
+  const sidebarWidth = isMobile ? 0 : (isCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_FULL_WIDTH);
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#0f1115', position: 'relative' }}>
-      {/* Mobile Sidebar Overlay */}
-      {isMobile && isSidebarOpen && (
-        <div className="mobile-sidebar-overlay" onClick={() => setIsSidebarOpen(false)} />
+
+      {/* Mobile overlay — tap to close sidebar */}
+      {isMobile && isMobileOpen && (
+        <div className="mobile-sidebar-overlay" onClick={() => setIsMobileOpen(false)} />
       )}
 
-      <Sidebar isOpen={isSidebarOpen} onToggle={toggleSidebar} />
+      <Sidebar
+        isOpen={isMobileOpen}
+        isCollapsed={isCollapsed}
+        onToggle={() => setIsMobileOpen(o => !o)}
+        onCollapseToggle={() => setIsCollapsed(c => !c)}
+      />
 
       <div
         className="main-content"
@@ -46,11 +54,12 @@ export default function Layout({ children }: LayoutProps) {
           flexDirection: 'column',
           minHeight: '100vh',
           overflow: 'hidden',
-          marginLeft: isMobile ? 0 : '250px',
-          transition: 'margin-left 0.3s ease'
+          marginLeft: `${sidebarWidth}px`,
+          transition: 'margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
         }}
       >
         {isElectron() && <UpdateBanner />}
+
         <header
           style={{
             flexShrink: 0,
@@ -63,10 +72,10 @@ export default function Layout({ children }: LayoutProps) {
             zIndex: 80
           }}
         >
-          {/* Mobile Hamburguer */}
-          <div style={{ display: isMobile ? 'block' : 'none' }}>
+          {/* Hamburger — mobile only */}
+          {isMobile && (
             <button
-              onClick={toggleSidebar}
+              onClick={() => setIsMobileOpen(o => !o)}
               style={{
                 background: 'none',
                 border: 'none',
@@ -79,16 +88,16 @@ export default function Layout({ children }: LayoutProps) {
             >
               <Menu size={24} />
             </button>
-          </div>
+          )}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginLeft: 'auto' }}>
+            {/* Manual sync button */}
             <button
               onClick={async () => {
                 if (isSyncing) return;
                 setIsSyncing(true);
                 try {
                   await api.post('/sync/trigger');
-                  // Let the UI spin for a minimum duration to give feedback
                   setTimeout(() => setIsSyncing(false), 1500);
                 } catch (err) {
                   console.error('Manual sync failed:', err);
@@ -104,17 +113,21 @@ export default function Layout({ children }: LayoutProps) {
                 alignItems: 'center',
                 padding: '0.5rem',
                 borderRadius: '50%',
-                transition: 'all 0.2s',
+                transition: 'all 0.2s'
               }}
               title="Force Sync Now"
             >
-              <RefreshCw size={20} className={isSyncing ? "animate-spin" : ""} />
+              <RefreshCw size={20} className={isSyncing ? 'animate-spin' : ''} />
             </button>
             <NotificationHub />
           </div>
         </header>
-        <main style={{ flex: 1, padding: isMobile ? '1rem' : '2rem', overflowY: 'auto' }}>{children}</main>
+
+        <main style={{ flex: 1, padding: isMobile ? '1rem' : '2rem', overflowY: 'auto' }}>
+          {children}
+        </main>
       </div>
+
       {isElectron() && <DebugConsole />}
     </div>
   );

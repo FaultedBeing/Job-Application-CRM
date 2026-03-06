@@ -777,7 +777,7 @@ async function deliverDesktopNotifications(settings) {
     };
 
     if (Notification && Notification.isSupported && !Notification.isSupported()) {
-      await markAllDelivered();
+      // Notifications not supported on this OS — don't mark as delivered; they'll retry on next poll
       return;
     }
 

@@ -24,11 +24,12 @@ export default function JobBoard() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [filteredJobs, setFilteredJobs] = useState<Job[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useSessionStorage<'date' | 'excitement' | 'fit'>('jobboard_sortBy', 'date');
+  const [sortBy, setSortBy] = useSessionStorage<'date' | 'excitement' | 'fit' | 'status'>('jobboard_sortBy', 'date');
   const [showAddModal, setShowAddModal] = useState(false);
   const [alertMsg, setAlertMsg] = useState<{ title: string; message: string } | null>(null);
   const [importing, setImporting] = useState(false);
   const [sortOrder, setSortOrder] = useSessionStorage<'asc' | 'desc'>('jobboard_sortOrder', 'desc');
+  const [statusFilter, setStatusFilter] = useSessionStorage<string>('jobboard_statusFilter', 'All');
 
 
   useEffect(() => {
@@ -37,7 +38,7 @@ export default function JobBoard() {
 
   useEffect(() => {
     filterAndSort();
-  }, [jobs, searchTerm, sortBy, sortOrder]);
+  }, [jobs, searchTerm, sortBy, sortOrder, statusFilter]);
 
   async function loadJobs() {
     try {
@@ -48,10 +49,17 @@ export default function JobBoard() {
     }
   }
 
+  const STATUS_ORDER = ['Wishlist', 'Applied', 'Interviewing', 'Offer', 'Rejected'];
+
   function filterAndSort() {
     let filtered = [...jobs];
 
-    // Filter
+    // Status chip filter
+    if (statusFilter && statusFilter !== 'All') {
+      filtered = filtered.filter(job => job.status === statusFilter);
+    }
+
+    // Text search
     if (searchTerm) {
       filtered = filtered.filter(job =>
         job.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -66,6 +74,8 @@ export default function JobBoard() {
         comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       } else if (sortBy === 'excitement') {
         comparison = a.excitement_score - b.excitement_score;
+      } else if (sortBy === 'status') {
+        comparison = STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status);
       } else {
         comparison = a.fit_score - b.fit_score;
       }
@@ -248,6 +258,7 @@ export default function JobBoard() {
           <option value="date">Sort by Date</option>
           <option value="excitement">Sort by Excitement</option>
           <option value="fit">Sort by Fit</option>
+          <option value="status">Sort by Stage</option>
         </select>
         <button
           onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
@@ -267,6 +278,31 @@ export default function JobBoard() {
         >
           {sortOrder === 'asc' ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
         </button>
+      </div>
+
+      {/* Stage filter chips */}
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+        {['All', 'Wishlist', 'Applied', 'Interviewing', 'Offer', 'Rejected'].map(s => {
+          const chipColors: Record<string, string> = {
+            All: '#6b7280', Wishlist: '#9ca3af', Applied: '#3b82f6',
+            Interviewing: '#fbbf24', Offer: '#34d399', Rejected: '#ef4444'
+          };
+          const active = statusFilter === s;
+          const c = chipColors[s];
+          const count = s === 'All' ? jobs.length : jobs.filter(j => j.status === s).length;
+          return (
+            <button key={s} onClick={() => setStatusFilter(s)}
+              style={{
+                padding: '0.35rem 0.9rem', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 600,
+                border: `1px solid ${c}`,
+                backgroundColor: active ? c + '33' : 'transparent',
+                color: active ? c : '#6b7280',
+                cursor: 'pointer', transition: 'all 0.15s'
+              }}>
+              {s} <span style={{ opacity: 0.7 }}>({count})</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Job Grid */}
