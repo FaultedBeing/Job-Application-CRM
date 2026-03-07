@@ -855,11 +855,11 @@ export default function Settings() {
                 justifyContent: 'space-between', gap: '1rem'
               }}>
                 <code style={{ fontSize: '0.7rem', color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {`http://${tailscaleIp}:3033/?set_user_id=${localStorage.getItem('cloud_user_id')}`}
+                  {`http://${tailscaleIp}${window.location.port ? `:${window.location.port}` : ''}/?set_user_id=${localStorage.getItem('cloud_user_id')}`}
                 </code>
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(`http://${tailscaleIp}:3033/?set_user_id=${localStorage.getItem('cloud_user_id')}`);
+                    navigator.clipboard.writeText(`http://${tailscaleIp}${window.location.port ? `:${window.location.port}` : ''}/?set_user_id=${localStorage.getItem('cloud_user_id')}`);
                     setCopied(true);
                     setTimeout(() => setCopied(false), 2000);
                   }}

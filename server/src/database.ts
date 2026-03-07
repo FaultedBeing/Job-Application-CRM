@@ -178,7 +178,7 @@ export class Database {
 
           if (action) {
             // Very basic table name extraction - in production this would be more robust
-            const match = sql.match(/(?:INSERT INTO|UPDATE|DELETE FROM)\s+([a-zA-Z0-9_]+)/i);
+            const match = sql.match(/(?:INSERT\s+(?:OR\s+(?:REPLACE|IGNORE|ROLLBACK|ABORT|FAIL)\s+)?INTO|UPDATE|DELETE\s+FROM)\s+([a-zA-Z0-9_]+)/i);
             tableName = match ? match[1] : null;
 
             if (tableName && tableName !== 'activity_log') {

@@ -58,7 +58,8 @@ const CloudSetupWizard: React.FC<CloudSetupWizardProps> = ({ onComplete }) => {
     const [sesRecipient, setSesRecipient] = useState('');
     const [sesSmtpHost, setSesSmtpHost] = useState('');
     // Auto-generated encryption key — generated once on component mount, never changes during the wizard
-    const [encryptionKey] = useState(() => generateEncryptionKey());
+    const [encryptionKey, setEncryptionKey] = useState(() => generateEncryptionKey());
+    const [manualKeyOverride, setManualKeyOverride] = useState(false);
     const [sesTestBusy, setSesTestBusy] = useState(false);
     const [sesTestStatus, setSesTestStatus] = useState<'idle' | 'ok' | 'error'>('idle');
     const [sesTestMsg, setSesTestMsg] = useState('');
@@ -507,24 +508,52 @@ const CloudSetupWizard: React.FC<CloudSetupWizardProps> = ({ onComplete }) => {
 
                         {/* Auto-generated key callout */}
                         <div style={{ padding: '1rem', backgroundColor: '#10b98115', border: `1px solid ${colors.green}33`, borderRadius: '10px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: colors.green, fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                                <Lock size={16} /> Auto-Generated Encryption Key
-                            </div>
-                            <p style={{ color: colors.muted, fontSize: '0.8rem', margin: '0 0 0.75rem' }}>
-                                We've created a unique key to encrypt your SES password before it's stored in Supabase.
-                                You'll need to copy this exact value into your Lambda's <code style={{ color: colors.amber }}>SETTINGS_ENCRYPTION_KEY</code> environment variable — that's it.
-                            </p>
-                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                                <code style={{ flex: 1, backgroundColor: '#0f1115', padding: '0.6rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', fontFamily: 'monospace', color: colors.amber, overflowX: 'auto', display: 'block', border: `1px solid ${colors.border}` }}>
-                                    {encryptionKey}
-                                </code>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: colors.green, fontWeight: 'bold', fontSize: '0.9rem' }}>
+                                    <Lock size={16} /> Encryption Key
+                                </div>
                                 <button
-                                    onClick={() => copyToClipboard(encryptionKey, setCopiedKey)}
-                                    style={{ background: copiedKey ? colors.green : colors.border, border: 'none', borderRadius: '6px', padding: '0.6rem 0.75rem', color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s' }}
+                                    onClick={() => setManualKeyOverride(!manualKeyOverride)}
+                                    style={{ background: 'none', border: 'none', color: colors.amber, fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}
                                 >
-                                    {copiedKey ? '✓ Copied' : <Copy size={16} />}
+                                    {manualKeyOverride ? 'Use Auto-Generated Key' : 'Enter Existing Key'}
                                 </button>
                             </div>
+
+                            {!manualKeyOverride ? (
+                                <>
+                                    <p style={{ color: colors.muted, fontSize: '0.8rem', margin: '0 0 0.75rem' }}>
+                                        We've created a unique key to encrypt your SES password before it's stored in Supabase.
+                                        You'll need to copy this exact value into your Lambda's <code style={{ color: colors.amber }}>SETTINGS_ENCRYPTION_KEY</code> environment variable.
+                                    </p>
+                                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                        <code style={{ flex: 1, backgroundColor: '#0f1115', padding: '0.6rem 0.75rem', borderRadius: '6px', fontSize: '0.8rem', fontFamily: 'monospace', color: colors.amber, overflowX: 'auto', display: 'block', border: `1px solid ${colors.border}` }}>
+                                            {encryptionKey}
+                                        </code>
+                                        <button
+                                            onClick={() => copyToClipboard(encryptionKey, setCopiedKey)}
+                                            style={{ background: copiedKey ? colors.green : colors.border, border: 'none', borderRadius: '6px', padding: '0.6rem 0.75rem', color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s' }}
+                                        >
+                                            {copiedKey ? '✓ Copied' : <Copy size={16} />}
+                                        </button>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <p style={{ color: colors.amber, fontSize: '0.8rem', margin: '0 0 0.75rem' }}>
+                                        <strong>Advanced:</strong> If you are connecting a secondary computer, paste the exact Encryption Key generated by your primary computer here so they can both read the SES passwords!
+                                    </p>
+                                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                        <input
+                                            type="text"
+                                            value={encryptionKey}
+                                            onChange={(e) => setEncryptionKey(e.target.value)}
+                                            placeholder="Paste primary computer's key here..."
+                                            style={{ ...inputStyle, flex: 1 }}
+                                        />
+                                    </div>
+                                </>
+                            )}
                         </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -645,8 +674,9 @@ const CloudSetupWizard: React.FC<CloudSetupWizardProps> = ({ onComplete }) => {
                                         {copiedEnvVars ? '✓ Copied' : <><Copy size={12} /> Copy</>}
                                     </button>
                                 </div>
-                                <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.5rem' }}>
-                                    ⚠️ The <code style={{ color: colors.amber }}>SETTINGS_ENCRYPTION_KEY</code> was auto-generated and saved to your local settings. Keep it secret.
+                                <p style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '0.75rem', lineHeight: 1.5 }}>
+                                    💡 <strong>Pro Tip:</strong> By default, the Lambda connects to Supabase and securely decrypts your SES credentials using <code style={{ color: colors.amber }}>SETTINGS_ENCRYPTION_KEY</code>. 
+                                    However, if you prefer, you can skip the encryption key entirely and just provide <code style={{ color: colors.amber }}>SES_KEY_ID</code>, <code style={{ color: colors.amber }}>SES_SECRET_KEY</code>, and <code style={{ color: colors.amber }}>SES_FROM</code> directly as Environment Variables!
                                 </p>
                             </div>
 

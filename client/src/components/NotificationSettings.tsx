@@ -23,6 +23,7 @@ export default function NotificationSettings() {
   const [sesRecipient, setSesRecipient] = useState('');
   const [sesSmtpHost, setSesSmtpHost] = useState('');
   const [sesEncryptionKey, setSesEncryptionKey] = useState('');
+  const [manualKeyOverride, setManualKeyOverride] = useState(false);
   const [sesTestBusy, setSesTestBusy] = useState(false);
   const [lambdaDownloading, setLambdaDownloading] = useState(false);
 
@@ -53,7 +54,7 @@ export default function NotificationSettings() {
     gmailClientId, gmailClientSecret, gmailEnabled, gmailRecipient,
     desktopSummaryThreshold, emailSummaryThreshold,
     discordEnabled, discordToken, discordRecipients,
-    sesRegion, sesKeyId, sesSecretKey, sesFrom, sesRecipient, sesSmtpHost,
+    sesRegion, sesKeyId, sesSecretKey, sesFrom, sesRecipient, sesSmtpHost, sesEncryptionKey,
     initialLoaded
   ]);
 
@@ -363,6 +364,13 @@ export default function NotificationSettings() {
                   <li>Enter your AWS SES SMTP credentials below and click <strong style={{ color: '#e5e7eb' }}>Test Email</strong>.</li>
                   <li>Click <strong style={{ color: '#fbbf24' }}>Download Lambda Package</strong> — your encryption key is pre-bundled inside automatically.</li>
                   <li>Upload the zip to AWS Lambda. Add <code style={{ color: '#fbbf24' }}>SUPABASE_URL</code> and <code style={{ color: '#fbbf24' }}>SUPABASE_SERVICE_KEY</code> as env vars.</li>
+                  <li>
+                    <strong>Authentication Choice:</strong> You have two options for the Lambda to connect to AWS SES:
+                    <ul style={{ marginTop: '0.4rem', marginBottom: '0.4rem', color: '#6b7280' }}>
+                      <li><strong>Option A (Synced):</strong> The Lambda will automatically extract and decrypt your passwords from Supabase if you provide the <code style={{ color: '#fbbf24' }}>SETTINGS_ENCRYPTION_KEY</code> (which was auto-generated during cloud setup).</li>
+                      <li><strong>Option B (Direct):</strong> Skip the encryption key entirely. Directly add <code style={{ color: '#fbbf24' }}>SES_KEY_ID</code>, <code style={{ color: '#fbbf24' }}>SES_SECRET_KEY</code>, and <code style={{ color: '#fbbf24' }}>SES_FROM</code> as Environment Variables in the Lambda Console.</li>
+                    </ul>
+                  </li>
                   <li>Set an EventBridge schedule (e.g. every 15 min) and you're done.</li>
                 </ol>
               </div>
@@ -407,26 +415,47 @@ export default function NotificationSettings() {
                   <input type="email" value={sesRecipient} onChange={e => setSesRecipient(e.target.value)} placeholder="Leave blank to use From address" style={inputStyle} />
                 </div>
 
-                {/* Auto-generated encryption key — read-only */}
+                {/* Encryption key */}
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={{ display: 'block', marginBottom: '0.35rem', color: '#e5e7eb', fontSize: '0.875rem' }}>
-                    Encryption Key
-                    <span style={{ marginLeft: '8px', color: '#10b981', fontSize: '0.75rem', fontWeight: 600, backgroundColor: '#10b98122', padding: '1px 8px', borderRadius: '99px' }}>AUTO-GENERATED</span>
-                  </label>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <input
-                      readOnly
-                      type="password"
-                      value={sesEncryptionKey}
-                      style={{ ...inputStyle, flex: 1, cursor: 'default', color: '#6b7280' }}
-                    />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                    <label style={{ color: '#e5e7eb', fontSize: '0.875rem' }}>
+                      Encryption Key
+                      {!manualKeyOverride && <span style={{ marginLeft: '8px', color: '#10b981', fontSize: '0.75rem', fontWeight: 600, backgroundColor: '#10b98122', padding: '1px 8px', borderRadius: '99px' }}>AUTO-GENERATED</span>}
+                    </label>
                     <button
-                      title="Copy key"
-                      onClick={() => { navigator.clipboard.writeText(sesEncryptionKey); showToast('Key copied', 'success'); }}
-                      style={{ padding: '0.75rem', backgroundColor: '#2d3139', border: '1px solid #374151', borderRadius: '6px', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-                      <Copy size={16} />
+                        onClick={() => setManualKeyOverride(!manualKeyOverride)}
+                        style={{ background: 'none', border: 'none', color: '#fbbf24', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}
+                    >
+                        {manualKeyOverride ? 'Use Auto-Generated Key' : 'Enter Existing Key'}
                     </button>
                   </div>
+                  
+                  {!manualKeyOverride ? (
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <input
+                        readOnly
+                        type="password"
+                        value={sesEncryptionKey}
+                        style={{ ...inputStyle, flex: 1, cursor: 'default', color: '#6b7280' }}
+                      />
+                      <button
+                        title="Copy key"
+                        onClick={() => { navigator.clipboard.writeText(sesEncryptionKey); showToast('Key copied', 'success'); }}
+                        style={{ padding: '0.75rem', backgroundColor: '#2d3139', border: '1px solid #374151', borderRadius: '6px', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                        <Copy size={16} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                        <input
+                            type="text"
+                            value={sesEncryptionKey}
+                            onChange={(e) => setSesEncryptionKey(e.target.value)}
+                            placeholder="Paste primary computer's key here..."
+                            style={{ ...inputStyle, flex: 1 }}
+                        />
+                    </div>
+                  )}
                   <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '0.4rem' }}>
                     Randomly generated on first run. Stored locally only — never synced to Supabase. It's pre-bundled into the Lambda download below so you don't have to copy it manually.
                   </p>

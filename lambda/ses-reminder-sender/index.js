@@ -138,12 +138,31 @@ async function getDistinctUsers(supabaseUrl, supabaseKey) {
 // Email sender
 // ---------------------------------------------------------------------------
 async function createTransporter(settings, encryptionKey) {
+    // 1. Prioritize direct Environment Variables set in the AWS Lambda Console
+    if (process.env.SES_KEY_ID && process.env.SES_SECRET_KEY) {
+        console.log('[CRM-Lambda] Using direct SES credentials from AWS Environment Variables.');
+        const host = process.env.SES_SMTP_HOST || `email-smtp.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com`;
+        const port = parseInt(process.env.SES_SMTP_PORT || '587', 10);
+        return nodemailer.createTransport({
+            host,
+            port,
+            secure: port === 465,
+            auth: { user: process.env.SES_KEY_ID, pass: process.env.SES_SECRET_KEY },
+        });
+    }
+
+    // 2. Fallback to Supabase Database settings
+    console.log('[CRM-Lambda] Using SES credentials from Supabase via SETTINGS_ENCRYPTION_KEY.');
+    if (!encryptionKey) {
+        throw new Error('SETTINGS_ENCRYPTION_KEY is missing. You must provide either direct SES_KEY_ID / SES_SECRET_KEY as env vars, or provide the SETTINGS_ENCRYPTION_KEY to decrypt them from Supabase.');
+    }
+
     const host = settings.ses_smtp_host || `email-smtp.${settings.ses_region || 'us-east-1'}.amazonaws.com`;
     const port = parseInt(settings.ses_smtp_port || '587', 10);
-    const user = settings.ses_key_id;  // ses_key_id is not in ENCRYPTED_KEYS, stored as plaintext
+    const user = settings.ses_key_id;  // plaintext stored in Supabase
     const pass = decryptSetting(settings.ses_secret_key, encryptionKey);
 
-    if (!user || !pass) throw new Error('SES SMTP credentials not configured. Set ses_key_id and ses_secret_key in Notification Settings.');
+    if (!user || !pass) throw new Error('SES SMTP credentials not found in Supabase. Please configure them in the App or provide them directly to Lambda as env vars.');
 
     return nodemailer.createTransport({
         host,
@@ -183,9 +202,11 @@ exports.handler = async (event) => {
         return { statusCode: 500, body: 'Missing Supabase configuration' };
     }
 
-    if (!ENCRYPTION_KEY) {
-        console.error('SETTINGS_ENCRYPTION_KEY is not set. Lambda cannot decrypt SES credentials stored in Supabase. Add this env var in the Lambda console — it must match the passphrase set in the app\'s Notification Settings.');
-        return { statusCode: 500, body: 'SETTINGS_ENCRYPTION_KEY not set' };
+    const hasDirectCreds = Boolean(process.env.SES_KEY_ID && process.env.SES_SECRET_KEY);
+    
+    if (!hasDirectCreds && !ENCRYPTION_KEY) {
+        console.error('Missing Credentials! You must provide either SES_KEY_ID / SES_SECRET_KEY directly as env vars OR provide SETTINGS_ENCRYPTION_KEY to decrypt them from Supabase.');
+        return { statusCode: 500, body: 'Missing Cloud Encryption Key or valid direct SES Env Vars' };
     }
 
     console.log('[CRM-Lambda] Starting reminder check...');
@@ -206,16 +227,19 @@ exports.handler = async (event) => {
 
                 if (reminders.length === 0) continue;
 
-                if (!settings.ses_key_id || !settings.ses_secret_key) {
-                    console.warn(`[CRM-Lambda] User ${userId}: SES credentials not configured. Skipping.`);
+                const hasDirectCreds = Boolean(process.env.SES_KEY_ID && process.env.SES_SECRET_KEY);
+
+                if (!hasDirectCreds && (!settings.ses_key_id || !settings.ses_secret_key)) {
+                    console.warn(`[CRM-Lambda] User ${userId}: SES credentials not configured in Supabase or direct Env Vars. Skipping.`);
                     continue;
                 }
 
-                const from = settings.ses_from;
-                const to = settings.ses_recipient || settings.ses_from;
+                // Prefer Environment Variables for from/to, fallback to Supabase User Settings
+                const from = process.env.SES_FROM || settings.ses_from;
+                const to = process.env.SES_RECIPIENT || process.env.SES_FROM || settings.ses_recipient || settings.ses_from;
 
                 if (!from || !to) {
-                    console.warn(`[CRM-Lambda] User ${userId}: SES from/to email not set. Skipping.`);
+                    console.warn(`[CRM-Lambda] User ${userId}: SES from/to email not set either via env var or Supabase. Skipping.`);
                     continue;
                 }
 
