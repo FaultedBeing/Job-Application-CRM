@@ -161,14 +161,14 @@ export default function Companies() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+      <div className="responsive-header">
         <h1 style={{ fontSize: '2rem', color: '#fbbf24', display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
           Companies
           <span style={{ fontSize: '1rem', color: '#9ca3af', fontWeight: 'normal' }}>
             ({companies.length})
           </span>
         </h1>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <div className="action-buttons">
           <input
             ref={fileInputRef}
             type="file"
@@ -236,8 +236,8 @@ export default function Companies() {
 
       {/* Filters & Search */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <div style={{ position: 'relative', flex: 1 }}>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: '1 1 300px' }}>
             <Search size={20} style={{ position: 'absolute', left: '12px', top: '10px', color: '#9ca3af' }} />
             <input
               type="text"
@@ -255,69 +255,74 @@ export default function Companies() {
               }}
             />
           </div>
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.6rem 1rem',
-              backgroundColor: showFilters ? '#fbbf2420' : '#1a1d24',
-              border: '1px solid',
-              borderColor: showFilters ? '#fbbf24' : '#2d3139',
-              borderRadius: '6px',
-              color: showFilters ? '#fbbf24' : '#9ca3af',
-              cursor: 'pointer',
-              transition: 'all 0.2s'
-            }}
-          >
-            <Filter size={18} />
-            Filters
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              style={{
-                padding: '0.6rem 2.5rem 0.6rem 1rem',
-                backgroundColor: '#1a1d24',
-                border: '1px solid #2d3139',
-                borderRadius: '6px',
-                color: '#e5e7eb',
-                fontSize: '0.95rem',
-                cursor: 'pointer',
-                minWidth: '210px',
-                appearance: 'none',
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 0.75rem center',
-                backgroundSize: '1rem'
-              }}
-            >
-              <option value="recent">Sort by Recent Activity</option>
-              <option value="name">Sort by Name</option>
-              <option value="jobs">Sort by Job Count</option>
-              <option value="industry">Sort by Industry</option>
-              <option value="excitement">Sort by Excitement</option>
-            </select>
+          <div style={{ display: 'flex', gap: '0.75rem', flex: '1 1 300px' }}>
             <button
-              onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-              title={sortOrder === 'asc' ? 'Sort Ascending' : 'Sort Descending'}
+              onClick={() => setShowFilters(!showFilters)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                width: '40px',
-                height: '40px',
-                backgroundColor: '#1a1d24',
-                border: '1px solid #2d3139',
+                gap: '0.5rem',
+                padding: '0.6rem 1rem',
+                backgroundColor: showFilters ? '#fbbf2420' : '#1a1d24',
+                border: '1px solid',
+                borderColor: showFilters ? '#fbbf24' : '#2d3139',
                 borderRadius: '6px',
-                color: '#fbbf24',
-                cursor: 'pointer'
+                color: showFilters ? '#fbbf24' : '#9ca3af',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                whiteSpace: 'nowrap'
               }}
             >
-              {sortOrder === 'asc' ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+              <Filter size={18} />
+              Filters
             </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                style={{
+                  flex: 1,
+                  padding: '0.6rem 2.5rem 0.6rem 1rem',
+                  backgroundColor: '#1a1d24',
+                  border: '1px solid #2d3139',
+                  borderRadius: '6px',
+                  color: '#e5e7eb',
+                  fontSize: '0.95rem',
+                  cursor: 'pointer',
+                  minWidth: '0',
+                  appearance: 'none',
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 0.75rem center',
+                  backgroundSize: '1rem'
+                }}
+              >
+                <option value="recent">Sort by Recent Activity</option>
+                <option value="name">Sort by Name</option>
+                <option value="jobs">Sort by Job Count</option>
+                <option value="industry">Sort by Industry</option>
+                <option value="excitement">Sort by Excitement</option>
+              </select>
+              <button
+                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                title={sortOrder === 'asc' ? 'Sort Ascending' : 'Sort Descending'}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '40px',
+                  height: '40px',
+                  backgroundColor: '#1a1d24',
+                  border: '1px solid #2d3139',
+                  borderRadius: '6px',
+                  color: '#fbbf24',
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+              >
+                {sortOrder === 'asc' ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -424,7 +429,7 @@ export default function Companies() {
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
+      <div className="responsive-grid">
         {sortedCompanies.map((company) => (
           <Link
             key={company.id}

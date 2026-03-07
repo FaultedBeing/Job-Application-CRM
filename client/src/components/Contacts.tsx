@@ -1004,10 +1004,10 @@ export default function Contacts() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
+      <div className="responsive-header">
         <h1 style={{ fontSize: '2rem', color: '#fbbf24' }}>Contacts</h1>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', width: '300px' }}>
+        <div className="action-buttons">
+          <div style={{ position: 'relative', flex: '1 1 300px' }}>
             <Search size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af' }} />
             <input
               type="text"
@@ -1150,13 +1150,7 @@ export default function Contacts() {
           )}
         </div>
       ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-            gap: '1.5rem'
-          }}
-        >
+        <div className="responsive-grid">
           {sortedContacts.map((contact) => (
             <div
               key={contact.id}

@@ -195,14 +195,14 @@ export default function Dashboard() {
       )}
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+      <div className="dashboard-stats">
         <StatCard icon={Briefcase} label="Total Applications" value={stats.total} color="#3b82f6" />
         <StatCard icon={TrendingUp} label="Applied" value={stats.applied} color="#a78bfa" />
         <StatCard icon={TrendingUp} label="Interviewing" value={stats.interviewing} color="#fbbf24" />
         <StatCard icon={Briefcase} label="Offers" value={stats.offers} color="#34d399" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+      <div className="responsive-grid" style={{ marginBottom: '2rem' }}>
         {/* Top Priority Jobs */}
         <section>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#e5e7eb' }}>
@@ -375,7 +375,7 @@ export default function Dashboard() {
           {recentContacts.length === 0 ? (
             <p style={{ color: '#9ca3af' }}>No contacts yet.</p>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '1rem' }}>
+            <div className="responsive-grid">
               {recentContacts.map((contact) => (
                 <Link
                   key={contact.id}

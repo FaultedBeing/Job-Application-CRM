@@ -1495,7 +1495,13 @@ export class Database {
         [r.due_at, richTitle, r.message, r.link_path || null, r.notify_desktop ?? 1, r.notify_email ?? 0, logoUrl, iconBg, r.id, r.due_at]
       );
 
-      await this.run('UPDATE reminders SET sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [r.id]);
+      // Only mark as sent if this is NOT an email reminder.
+      // E.g. purely desktop notifications are "sent" by simply generating the notification row.
+      // If it IS an email reminder, we leave sent_at = NULL so the Lambda (or the manual /api/ses sweep)
+      // can pick it up and mark it sent there instead.
+      if (r.notify_email !== 1) {
+        await this.run('UPDATE reminders SET sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [r.id]);
+      }
       created += 1;
     }
     return { created, dueCount: due.length };

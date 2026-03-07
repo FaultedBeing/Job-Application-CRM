@@ -145,9 +145,9 @@ export default function JobBoard() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+      <div className="responsive-header">
         <h1 style={{ fontSize: '2rem', color: '#fbbf24' }}>Job Applications</h1>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <div className="action-buttons">
           <input
             id="job-import-input"
             type="file"
@@ -218,8 +218,8 @@ export default function JobBoard() {
       </div>
 
       {/* Filters */}
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
-        <div style={{ position: 'relative', flex: 1 }}>
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
+        <div style={{ position: 'relative', flex: '1 1 300px' }}>
           <Search size={20} style={{ position: 'absolute', left: '12px', top: '12px', color: '#9ca3af' }} />
           <input
             type="text"
@@ -237,47 +237,50 @@ export default function JobBoard() {
             }}
           />
         </div>
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as any)}
-          style={{
-            padding: '0.75rem 2.5rem 0.75rem 1rem',
-            backgroundColor: '#1a1d24',
-            border: '1px solid #2d3139',
-            borderRadius: '6px',
-            color: '#e5e7eb',
-            fontSize: '1rem',
-            cursor: 'pointer',
-            appearance: 'none',
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-            backgroundRepeat: 'no-repeat',
-            backgroundPosition: 'right 0.75rem center',
-            backgroundSize: '1rem'
-          }}
-        >
-          <option value="date">Sort by Date</option>
-          <option value="excitement">Sort by Excitement</option>
-          <option value="fit">Sort by Fit</option>
-          <option value="status">Sort by Stage</option>
-        </select>
-        <button
-          onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-          title={sortOrder === 'asc' ? 'Sort Ascending' : 'Sort Descending'}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '46px',
-            height: '46px',
-            backgroundColor: '#1a1d24',
-            border: '1px solid #2d3139',
-            borderRadius: '6px',
-            color: '#fbbf24',
-            cursor: 'pointer'
-          }}
-        >
-          {sortOrder === 'asc' ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
-        </button>
+        <div style={{ display: 'flex', gap: '1rem', flex: '1 1 300px' }}>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            style={{
+              flex: 1,
+              padding: '0.75rem 2.5rem 0.75rem 1rem',
+              backgroundColor: '#1a1d24',
+              border: '1px solid #2d3139',
+              borderRadius: '6px',
+              color: '#e5e7eb',
+              fontSize: '1rem',
+              cursor: 'pointer',
+              appearance: 'none',
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 0.75rem center',
+              backgroundSize: '1rem'
+            }}
+          >
+            <option value="date">Sort by Date</option>
+            <option value="excitement">Sort by Excitement</option>
+            <option value="fit">Sort by Fit</option>
+            <option value="status">Sort by Stage</option>
+          </select>
+          <button
+            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+            title={sortOrder === 'asc' ? 'Sort Ascending' : 'Sort Descending'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '46px',
+              height: '46px',
+              backgroundColor: '#1a1d24',
+              border: '1px solid #2d3139',
+              borderRadius: '6px',
+              color: '#fbbf24',
+              cursor: 'pointer'
+            }}
+          >
+            {sortOrder === 'asc' ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
+          </button>
+        </div>
       </div>
 
       {/* Stage filter chips */}
@@ -306,7 +309,7 @@ export default function JobBoard() {
       </div>
 
       {/* Job Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
+      <div className="responsive-grid">
         {filteredJobs.map((job) => (
           <Link
             key={job.id}

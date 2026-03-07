@@ -25,8 +25,6 @@ function App() {
 
       if (setUserId) {
         localStorage.setItem('cloud_user_id', setUserId);
-        const newUrl = window.location.pathname;
-        window.history.replaceState({}, '', newUrl);
       }
       // --- END HANDLER ---
 
