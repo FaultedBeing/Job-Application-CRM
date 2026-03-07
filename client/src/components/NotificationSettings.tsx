@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Download } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Download, AlertCircle } from 'lucide-react';
 import api from '../api';
 
 export default function NotificationSettings() {
@@ -365,6 +365,17 @@ export default function NotificationSettings() {
                   <li>Upload the zip to AWS Lambda. Add <code style={{ color: '#fbbf24' }}>SUPABASE_URL</code> and <code style={{ color: '#fbbf24' }}>SUPABASE_SERVICE_KEY</code> as env vars.</li>
                   <li>Set an EventBridge schedule (e.g. every 15 min) and you're done.</li>
                 </ol>
+              </div>
+
+              {/* Multiple Computers Warning */}
+              <div style={{ padding: '1rem', backgroundColor: '#fbbf2415', borderRadius: '8px', border: '1px solid #fbbf2444', marginBottom: '1.5rem' }}>
+                <div style={{ color: '#fbbf24', fontWeight: 600, marginBottom: '0.4rem', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <AlertCircle size={16} /> 
+                  Using Multiple Computers?
+                </div>
+                <p style={{ color: '#9ca3af', fontSize: '0.85rem', margin: 0, lineHeight: 1.6 }}>
+                  If you already configured Email Reminders and deployed your Lambda from your <strong>primary computer</strong>, you do <strong>not</strong> need to configure it again here. The Cloud App relies on the encryption key generated on your primary PC. Simply skip this section and let your primary setup handle the emails!
+                </p>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', maxWidth: '640px' }}>

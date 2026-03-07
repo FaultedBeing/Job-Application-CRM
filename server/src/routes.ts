@@ -897,16 +897,20 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
       // Look for the pre-built zip in known locations
       const candidates: string[] = [];
 
-      // 1. Packaged Electron app: extraResources end up in process.resourcesPath
-      const resPath = (process as any).resourcesPath;
-      if (typeof resPath === 'string') {
+      // 1. Packaged Electron app: RESOURCES_PATH is passed by main.js as env var
+      //    (process.resourcesPath is Electron-only, doesn't exist in spawned Node child)
+      const resPath = process.env.RESOURCES_PATH;
+      if (resPath) {
         candidates.push(path.join(resPath, 'lambda', zipName));
       }
 
-      // 2. Dev mode: relative to compiled server code (__dirname = server/dist)
+      // 2. Production: __dirname = resources/server-dist/, so ../lambda/ is in resources/
+      candidates.push(path.join(__dirname, '..', 'lambda', zipName));
+
+      // 3. Dev mode: relative to compiled server code (__dirname = server/dist)
       candidates.push(path.join(__dirname, '..', '..', 'lambda', zipName));
 
-      // 3. Dev mode: relative to process.cwd()
+      // 4. Dev mode: relative to process.cwd()
       candidates.push(path.join(process.cwd(), 'lambda', zipName));
 
       let zipPath = '';

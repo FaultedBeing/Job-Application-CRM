@@ -494,6 +494,17 @@ const CloudSetupWizard: React.FC<CloudSetupWizardProps> = ({ onComplete }) => {
                             </div>
                         </div>
 
+                        {/* Multiple Computers Warning */}
+                        <div style={{ padding: '1rem', backgroundColor: '#fbbf2415', borderRadius: '8px', border: '1px solid #fbbf2444' }}>
+                            <div style={{ color: '#fbbf24', fontWeight: 600, marginBottom: '0.4rem', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <AlertCircle size={16} /> 
+                                Connecting a Second Computer?
+                            </div>
+                            <p style={{ color: '#9ca3af', fontSize: '0.85rem', margin: 0, lineHeight: 1.6 }}>
+                                If you already configured Email Reminders and deployed your Lambda from your <strong>primary computer</strong>, you must <strong>skip this step</strong>. The Cloud App relies on the encryption key generated on your primary PC. Simply click "Skip for now" to avoid overwriting your credentials!
+                            </p>
+                        </div>
+
                         {/* Auto-generated key callout */}
                         <div style={{ padding: '1rem', backgroundColor: '#10b98115', border: `1px solid ${colors.green}33`, borderRadius: '10px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: colors.green, fontWeight: 'bold', marginBottom: '0.5rem', fontSize: '0.9rem' }}>

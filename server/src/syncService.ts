@@ -204,7 +204,11 @@ export class SyncService {
 
                 if (action === 'INSERT' || action === 'UPDATE') {
                     if (!data || Object.keys(payload).length === 0) {
-                        payload = await this.db.get(`SELECT * FROM ${table_name} WHERE id = ?`, [record_id]);
+                        if (table_name === 'settings') {
+                            payload = await this.db.get(`SELECT * FROM settings WHERE key = ?`, [item.record_key]);
+                        } else {
+                            payload = await this.db.get(`SELECT * FROM ${table_name} WHERE id = ?`, [record_id]);
+                        }
                         if (!payload) {
                             // Record deleted locally before sync ran
                             await this.db.run('UPDATE sync_queue SET synced_at = CURRENT_TIMESTAMP WHERE id = ?', [item.id], true);
@@ -212,7 +216,9 @@ export class SyncService {
                         }
                     }
 
-                    const record = { ...payload, id: record_id, user_id: userId };
+                    const record = table_name === 'settings'
+                        ? { ...payload, user_id: userId }
+                        : { ...payload, id: record_id, user_id: userId };
 
                     // Pre-flight: strip virtual/computed columns not in the actual DB schema
                     const tableInfo = await this.db.all(`PRAGMA table_info(${table_name})`);
@@ -307,10 +313,14 @@ export class SyncService {
                     }
                     // --- END DOCUMENT DELETION INTERCEPTOR ---
 
+                    const matchCondition = table_name === 'settings'
+                        ? { key: item.record_key, user_id: userId }
+                        : { id: record_id, user_id: userId };
+
                     const { error } = await this.supabase!
                         .from(table_name)
                         .delete()
-                        .match({ id: record_id, user_id: userId })
+                        .match(matchCondition)
                         .select();
 
                     if (error) throw error;
@@ -466,12 +476,15 @@ export class SyncService {
     // This is now a clean check-and-update-or-insert with no dead code.
     private async upsertLocal(table: string, record: any) {
         const keys = Object.keys(record);
-        const existing = await this.db.get(`SELECT id FROM ${table} WHERE id = ?`, [record.id]);
+        const idCol = table === 'settings' ? 'key' : 'id';
+        const idVal = table === 'settings' ? record.key : record.id;
+        
+        const existing = await this.db.get(`SELECT ${idCol} FROM ${table} WHERE ${idCol} = ?`, [idVal]);
 
         if (existing) {
             const setClause = keys.map(k => `${k} = ?`).join(', ');
-            const params = keys.map(k => record[k]).concat(record.id);
-            await this.db.run(`UPDATE ${table} SET ${setClause} WHERE id = ?`, params, true);
+            const params = keys.map(k => record[k]).concat(idVal);
+            await this.db.run(`UPDATE ${table} SET ${setClause} WHERE ${idCol} = ?`, params, true);
         } else {
             const placeholders = keys.map(() => '?').join(', ');
             const params = keys.map(k => record[k]);
