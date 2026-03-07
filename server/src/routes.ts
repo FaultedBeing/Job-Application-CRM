@@ -9,7 +9,6 @@ import * as XLSX from 'xlsx';
 import { SyncService } from './syncService';
 import axios from 'axios';
 import archiver from 'archiver';
-import { execSync } from 'child_process';
 
 export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsPath: string, syncService: SyncService) {
   // Middleware to extract user identity from headers
@@ -893,80 +892,49 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
 
   app.get('/api/download/lambda', async (req: Request, res: Response) => {
     try {
-      // Locate the ses-reminder-sender source folder
-      const lambdaSourcePaths = [
-        path.join(__dirname, '..', '..', 'lambda', 'ses-reminder-sender'),
-        path.join(process.cwd(), 'lambda', 'ses-reminder-sender'),
-      ];
+      const zipName = 'ses-reminder-sender.zip';
 
-      let lambdaSource = '';
-      for (const p of lambdaSourcePaths) {
-        if (await fs.pathExists(path.join(p, 'index.js'))) {
-          lambdaSource = p;
+      // Look for the pre-built zip in known locations
+      const candidates: string[] = [];
+
+      // 1. Packaged Electron app: extraResources end up in process.resourcesPath
+      const resPath = (process as any).resourcesPath;
+      if (typeof resPath === 'string') {
+        candidates.push(path.join(resPath, 'lambda', zipName));
+      }
+
+      // 2. Dev mode: relative to compiled server code (__dirname = server/dist)
+      candidates.push(path.join(__dirname, '..', '..', 'lambda', zipName));
+
+      // 3. Dev mode: relative to process.cwd()
+      candidates.push(path.join(process.cwd(), 'lambda', zipName));
+
+      let zipPath = '';
+      for (const p of candidates) {
+        if (await fs.pathExists(p)) {
+          zipPath = p;
           break;
         }
       }
 
-      if (lambdaSource) {
-        // Ensure node_modules are installed
-        const nmPath = path.join(lambdaSource, 'node_modules');
-        if (!await fs.pathExists(nmPath)) {
-          console.log('[Lambda Download] Running npm install in', lambdaSource);
-          try {
-            execSync('npm install --production', { cwd: lambdaSource, timeout: 60000, stdio: 'pipe' });
-          } catch (installErr) {
-            console.error('[Lambda Download] npm install failed:', installErr);
-          }
-        }
-
-        // Stream the directory as a ZIP
-        res.setHeader('Content-Disposition', 'attachment; filename="ses-reminder-lambda.zip"');
-        res.setHeader('Content-Type', 'application/zip');
-
-        const archive = archiver('zip', { zlib: { level: 9 } });
-        archive.on('error', (err: Error) => {
-          console.error('Archiver error:', err);
-          if (!res.headersSent) res.status(500).json({ error: err.message });
+      if (!zipPath) {
+        console.error('[Lambda Download] ZIP not found. Searched:', candidates);
+        return res.status(404).json({
+          error: 'Lambda deployment package not found.',
+          details: 'The pre-built ses-reminder-sender.zip is missing. Run build-lambda-zip.js to generate it.',
+          searched: candidates
         });
-        archive.pipe(res);
-        // Add all files except .git
-        archive.glob('**/*', {
-          cwd: lambdaSource,
-          ignore: ['.git/**', '.gitignore'],
-          dot: false
-        });
-        await archive.finalize();
-        return;
       }
 
-      // Fallback: serve the pre-built ZIP from client/public or client/dist
-      const fileName = 'lambda-deployment.zip';
-      const fallbackPaths = [
-        path.join(__dirname, '..', '..', 'client', 'public', fileName),
-        path.join(__dirname, '..', '..', 'client', 'dist', fileName),
-        path.join(__dirname, '..', 'client-dist', fileName),
-        path.join(process.cwd(), 'client', 'public', fileName),
-        path.join(process.cwd(), 'client', 'dist', fileName),
-        path.join(process.cwd(), 'resources', 'client-dist', fileName)
-      ];
-
-      let filePath = '';
-      for (const p of fallbackPaths) {
-        if (await fs.pathExists(p)) { filePath = p; break; }
-      }
-
-      if (!filePath) {
-        return res.status(404).json({ error: 'Lambda deployment package not found. Run the app from the project root so the source folder is accessible.' });
-      }
-
-      res.download(filePath, fileName, (err) => {
+      console.log('[Lambda Download] Serving zip from:', zipPath);
+      res.download(zipPath, zipName, (err) => {
         if (err) {
-          console.error('Download error:', err);
+          console.error('[Lambda Download] Send error:', err);
           if (!res.headersSent) res.status(500).json({ error: 'Download failed', details: err.message });
         }
       });
     } catch (error: any) {
-      console.error('Route error:', error);
+      console.error('[Lambda Download] Route error:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -1556,63 +1524,10 @@ export function setupRoutes(app: Express, db: Database, upload: Multer, uploadsP
     }
   });
 
-  // ── Lambda package download ──────────────────────────────────────────────────
-  // Copies the lambda source to a temp dir, runs npm install, injects the
-  // encryption key into a .env file, then streams the fully self-contained zip.
-  // The user downloads one zip and uploads it straight to AWS — no manual steps.
-  app.get('/api/lambda/download', async (_req: Request, res: Response) => {
-    const os = require('os');
-    const tmpDir = path.join(os.tmpdir(), `crm-lambda-${Date.now()}`);
-    try {
-      const settings = await db.getSettings();
-      const encryptionKey = settings.supabase_encryption_key || '';
-
-      const lambdaDir = path.resolve(__dirname, '..', '..', '..', 'lambda', 'ses-reminder-sender');
-      if (!fs.existsSync(lambdaDir)) {
-        return res.status(404).json({ error: `Lambda source not found at ${lambdaDir}` });
-      }
-
-      // Copy source files to temp dir (excludes any existing node_modules)
-      await fs.copy(lambdaDir, tmpDir, {
-        filter: (src: string) => !src.includes('node_modules')
-      });
-
-      // Inject .env with the encryption key pre-filled
-      const envContent = [
-        '# Auto-generated by Job Application CRM',
-        `SETTINGS_ENCRYPTION_KEY=${encryptionKey}`,
-        '',
-        '# Fill these in before deploying to AWS Lambda:',
-        'SUPABASE_URL=',
-        'SUPABASE_SERVICE_KEY=',
-      ].join('\n');
-      await fs.writeFile(path.join(tmpDir, '.env'), envContent);
-
-      // Run npm install in the temp dir to bundle dependencies
-      console.log('[Lambda Download] Running npm install in temp dir...');
-      execSync('npm install --omit=dev', { cwd: tmpDir, stdio: 'pipe' });
-      console.log('[Lambda Download] npm install complete.');
-
-      // Stream the zip response
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', 'attachment; filename="ses-reminder-sender.zip"');
-
-      const archive = archiver('zip', { zlib: { level: 6 } });
-      archive.on('error', (err: Error) => {
-        console.error('Lambda zip error:', err);
-        res.status(500).end();
-      });
-      archive.pipe(res);
-      archive.directory(tmpDir, false);
-      await archive.finalize();
-
-    } catch (error: any) {
-      console.error('Lambda download error:', error);
-      if (!res.headersSent) res.status(500).json({ error: error.message });
-    } finally {
-      // Clean up temp dir after response finishes
-      fs.remove(tmpDir).catch(() => { });
-    }
+  // ── Lambda package download (alias) ─────────────────────────────────────────
+  // Redirects to the canonical /api/download/lambda route for backwards compat.
+  app.get('/api/lambda/download', (_req: Request, res: Response) => {
+    res.redirect('/api/download/lambda');
   });
 }
 

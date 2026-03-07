@@ -16,11 +16,11 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-echo [1/4] Checking Node.js version...
+echo [1/5] Checking Node.js version...
 node --version
 echo.
 
-echo [2/4] Installing dependencies...
+echo [2/5] Installing dependencies...
 echo Installing server dependencies...
 cd server
 call npm install
@@ -50,7 +50,7 @@ if %ERRORLEVEL% NEQ 0 (
 cd ..
 echo.
 
-echo [3/4] Building server and client...
+echo [3/5] Building server and client...
 echo Building server...
 cd server
 call npm run build
@@ -71,7 +71,16 @@ if %ERRORLEVEL% NEQ 0 (
 cd ..
 echo.
 
-echo [4/4] Creating executable...
+echo [4/5] Building Lambda deployment package...
+call node build-lambda-zip.js
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to build Lambda package
+    pause
+    exit /b 1
+)
+echo.
+
+echo [5/5] Creating executable...
 echo.
 echo NOTE: Make sure the .exe is not currently running!
 echo Close any open instances of "Cloud Job Application Tracker" before building.

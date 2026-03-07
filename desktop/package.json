@@ -93,6 +93,10 @@
       {
         "from": "icon.png",
         "to": "."
+      },
+      {
+        "from": "../lambda/ses-reminder-sender.zip",
+        "to": "lambda/ses-reminder-sender.zip"
       }
     ]
   },
